@@ -202,7 +202,13 @@ export class ChromeLauncher {
     if (!this.persistent && this.userDataDir) {
       const dir = this.userDataDir;
       this.userDataDir = null;
-      await fs.rm(dir, { recursive: true, force: true });
+      // Wait for Chrome to release file handles
+      await new Promise(r => setTimeout(r, 300));
+      try {
+        await fs.rm(dir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup failures — OS will reclaim temp files
+      }
     } else {
       this.userDataDir = null;
     }

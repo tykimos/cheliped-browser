@@ -25,7 +25,19 @@ export class SemanticExtractor {
     } else {
       this.walk(node, results);
     }
-    return results;
+    return this.deduplicateHeadings(results);
+  }
+
+  private deduplicateHeadings(elements: SemanticElement[]): SemanticElement[] {
+    const seenHeadingTexts = new Set<string>();
+    return elements.filter((el) => {
+      if (!el.tag) return true; // not a heading
+      const text = (el.text ?? '').trim();
+      if (!text) return false; // drop empty headings
+      if (seenHeadingTexts.has(text)) return false; // duplicate
+      seenHeadingTexts.add(text);
+      return true;
+    });
   }
 
   private walk(node: InternalDomNode, results: SemanticElement[], currentFormId?: number): void {

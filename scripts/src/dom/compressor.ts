@@ -6,7 +6,7 @@ const DEFAULTS: Required<CompressionOptions> = {
   enabled: true,
   maxTextLength: 300,
   maxListItems: 30,
-  maxLinks: 20,
+  maxLinks: 5000,
   maxImages: 10,
   excludeEmptyTexts: true,
   deduplicateLinks: true,
@@ -40,16 +40,32 @@ export class TokenCompressor {
       return el;
     });
 
-    // 3. Deduplicate links (same href)
+    // 3. Deduplicate links (same href — keep the one with the most descriptive text)
     if (this.opts.deduplicateLinks) {
-      const seenHrefs = new Set<string>();
-      result = result.filter(el => {
+      // First pass: for each href, find the most descriptive (longest) text
+      const bestTextForHref = new Map<string, string>();
+      for (const el of result) {
         if (el.category === 'link' && el.href) {
-          if (seenHrefs.has(el.href)) return false;
-          seenHrefs.add(el.href);
+          const current = bestTextForHref.get(el.href);
+          const text = el.text ?? '';
+          if (current === undefined || text.length > current.length) {
+            bestTextForHref.set(el.href, text);
+          }
         }
-        return true;
-      });
+      }
+      // Second pass: keep only the first occurrence of each href, using the best text
+      const usedHrefs = new Set<string>();
+      result = result.reduce<SemanticElement[]>((acc, el) => {
+        if (el.category === 'link' && el.href) {
+          if (usedHrefs.has(el.href)) return acc;
+          usedHrefs.add(el.href);
+          const best = bestTextForHref.get(el.href);
+          acc.push(best !== undefined && el.text !== best ? { ...el, text: best } : el);
+        } else {
+          acc.push(el);
+        }
+        return acc;
+      }, []);
     }
 
     // 4. Limit links
