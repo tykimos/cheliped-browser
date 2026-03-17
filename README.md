@@ -274,14 +274,74 @@ Raw DOM Tree
 - agent-browser detects **zero** interactive elements via its snapshot format.
 - Cheliped has **zero framework dependencies** — just `ws` for WebSocket.
 
+### Content Recognition Quality
+
+> How accurately does each tool capture **real page content**?
+> Ground truth collected via Playwright `page.evaluate()` (visible elements, computed styles).
+
+**Ground Truth (actual visible content on each site)**
+
+| Site | Visible Texts | Links | Buttons | Inputs | Headings |
+|:-----|-------------:|------:|--------:|-------:|---------:|
+| Hacker News | 250 | 198 | 0 | 1 | 0 |
+| Wikipedia | 1,370 | 500 | 22 | 14 | 12 |
+| GitHub | 1,087 | 45 | 12 | 0 | 14 |
+| Example.com | 3 | 1 | 0 | 0 | 1 |
+
+**Text Recall** (% of visible text fragments recognized)
+
+| Site | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|--------------:|-----------:|----------:|
+| Hacker News | 89.5% | 89.5% | 89.5% | 89.5% |
+| Wikipedia | 78.0% | **92.5%** | 90.0% | 90.0% |
+| GitHub | **25.0%** | 12.0% | 12.0% | 8.5% |
+| Example.com | 100.0% | 100.0% | 100.0% | 100.0% |
+
+**Link Detection** (Recall / Precision)
+
+| Site | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|--------------:|-----------:|----------:|
+| Hacker News | **100% / 100%** | 100% / 100% | 99% / 88% | 99% / 86% |
+| Wikipedia | 84% / **100%** | 84% / 95% | 84% / 95% | 84% / 95% |
+| GitHub | **100% / 54%** | 78% / 45% | 78% / 45% | 73% / 44% |
+| Example.com | **100% / 100%** | 100% / 100% | 100% / 100% | 100% / 100% |
+
+**Button Detection** (found / ground-truth)
+
+| Site | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|--------------:|-----------:|----------:|
+| Wikipedia | **21/22** | 21/22 | 8/22 | 3/22 |
+| GitHub | **11/12** | 7/12 | 7/12 | 2/12 |
+
+**Input Field Detection** (found / ground-truth)
+
+| Site | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|--------------:|-----------:|----------:|
+| Hacker News | **1/1** | 0/1 | 0/1 | 0/1 |
+| Wikipedia | **11/14** | 1/14 | 0/14 | 0/14 |
+
+### Overall Quality Score
+
+Weighted: Text Recall 30% + Link Recall 25% + Link Precision 15% + Button Recall 15% + Input Recall 15%
+
+| Metric | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-------|--------:|--------------:|-----------:|----------:|
+| Text Recall | 73.1% | **73.5%** | 72.9% | 72.0% |
+| Link Recall | **95.9%** | 90.3% | 90.1% | 89.0% |
+| Link Precision | **88.6%** | 85.2% | 82.0% | 81.2% |
+| Button Recall | **96.8%** | 88.4% | 73.7% | 57.6% |
+| Input Recall | **69.6%** | 1.8% | 50.0% | 50.0% |
+| **Overall** | **84.2%** | 70.9% | 75.2% | 72.2% |
+
 <details>
-<summary>🔧 Run the benchmark yourself</summary>
+<summary>🔧 Run the benchmarks yourself</summary>
 
 ```bash
 cd scripts
 npm install
 npm run build
-node benchmark-compare.mjs
+node benchmark-compare.mjs   # Token efficiency & speed
+node benchmark-quality.mjs   # Content recognition quality
 ```
 
 </details>
