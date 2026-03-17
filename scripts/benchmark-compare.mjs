@@ -178,17 +178,17 @@ async function benchPlaywrightMCP(targets) {
       await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
       r.navTime = performance.now() - navStart;
 
-      // Accessibility snapshot (what Playwright MCP uses)
+      // Aria snapshot (what Playwright MCP uses)
       const obsStart = performance.now();
-      const snapshot = await page.accessibility.snapshot({ interestingOnly: true });
+      const snapshot = await page.locator('body').ariaSnapshot();
       r.observeTime = performance.now() - obsStart;
 
-      const snapshotStr = JSON.stringify(snapshot);
-      r.outputChars = snapshotStr.length;
-      r.outputTokens = estimateTokens(snapshotStr);
+      r.outputChars = snapshot.length;
+      r.outputTokens = estimateTokens(snapshot);
 
-      // Count elements
-      r.elementCount = countA11yNodes(snapshot);
+      // Count elements (lines with role patterns like "- link", "- button", "- heading")
+      const roleLines = snapshot.match(/^- \w+/gm);
+      r.elementCount = roleLines ? roleLines.length : 0;
 
       r.success = true;
     } catch (e) {
@@ -211,6 +211,55 @@ function countA11yNodes(node) {
     }
   }
   return count;
+}
+
+// ─── Puppeteer (accessibility snapshot) ──────────────────────────
+
+async function benchPuppeteer(targets) {
+  console.log('  🤖 Puppeteer...');
+  const results = [];
+
+  let puppeteer;
+  try {
+    puppeteer = await import('puppeteer');
+  } catch {
+    console.log('    ⚠️  Puppeteer not installed, skipping.');
+    return { results: [], launchTime: 0 };
+  }
+
+  const launchStart = performance.now();
+  const browser = await puppeteer.default.launch({ headless: 'new' });
+  const page = await browser.newPage();
+  const launchTime = performance.now() - launchStart;
+
+  for (const target of targets) {
+    const r = { name: target.name, tool: 'Puppeteer' };
+
+    try {
+      const navStart = performance.now();
+      await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      r.navTime = performance.now() - navStart;
+
+      // Accessibility snapshot
+      const obsStart = performance.now();
+      const snapshot = await page.accessibility.snapshot({ interestingOnly: true });
+      r.observeTime = performance.now() - obsStart;
+
+      const snapshotStr = JSON.stringify(snapshot);
+      r.outputChars = snapshotStr.length;
+      r.outputTokens = estimateTokens(snapshotStr);
+      r.elementCount = countA11yNodes(snapshot);
+
+      r.success = true;
+    } catch (e) {
+      r.success = false;
+      r.error = e.message?.substring(0, 100);
+    }
+    results.push(r);
+  }
+
+  await browser.close();
+  return { results, launchTime };
 }
 
 // ─── Raw HTML baseline ──────────────────────────────────────────
@@ -254,7 +303,7 @@ async function main() {
   console.log('🦀 Cheliped Browser — Competitive Benchmark');
   console.log('═'.repeat(72));
   console.log('');
-  console.log('Tools: Cheliped Browser vs agent-browser (Vercel) vs Playwright (a11y)');
+  console.log('Tools: Cheliped vs agent-browser vs Playwright vs Puppeteer');
   console.log(`Sites: ${TARGETS.map(t => t.name).join(', ')}`);
   console.log('');
   console.log('Running benchmarks...');
@@ -275,6 +324,14 @@ async function main() {
     playwrightRes = { results: [], launchTime: 0 };
   }
 
+  let puppeteerRes;
+  try {
+    puppeteerRes = await benchPuppeteer(TARGETS);
+  } catch (e) {
+    console.log(`  ⚠️  Puppeteer benchmark failed: ${e.message}`);
+    puppeteerRes = { results: [], launchTime: 0 };
+  }
+
   // ─── Output ───
 
   console.log('');
@@ -283,88 +340,88 @@ async function main() {
   console.log('📊 COMPARATIVE RESULTS');
   console.log('═'.repeat(72));
 
+  // Helper to find results
+  const find = (arr, name) => arr.find(r => r.name === name);
+
   // Table 1: Token Efficiency
   console.log('');
   console.log('## Token Efficiency (output tokens for LLM consumption)');
   console.log('');
-  console.log('| Site | Raw HTML | Cheliped | agent-browser | Playwright a11y |');
-  console.log('|------|---------|----------|---------------|-----------------|');
+  console.log('| Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer |');
+  console.log('|------|---------|----------|---------------|------------|-----------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
     const html = htmlBaseline.find(h => h.name === name);
-    const ch = cheliped.results.find(r => r.name === name);
-    const ab = agentBr.results.find(r => r.name === name);
-    const pw = playwrightRes.results.find(r => r.name === name);
+    const ch = find(cheliped.results, name);
+    const ab = find(agentBr.results, name);
+    const pw = find(playwrightRes.results, name);
+    const pp = find(puppeteerRes.results, name);
 
-    const htmlTok = html ? formatNumber(html.htmlTokens) : '—';
-    const chTok = ch?.success ? formatNumber(ch.outputTokens) : '❌';
-    const abTok = ab?.success ? formatNumber(ab.outputTokens) : '❌';
-    const pwTok = pw?.success ? formatNumber(pw.outputTokens) : '❌';
+    const tok = r => r?.success ? formatNumber(r.outputTokens) : '❌';
 
-    console.log(`| ${name} | ${htmlTok} | ${chTok} | ${abTok} | ${pwTok} |`);
+    console.log(`| ${name} | ${html ? formatNumber(html.htmlTokens) : '—'} | ${tok(ch)} | ${tok(ab)} | ${tok(pw)} | ${tok(pp)} |`);
   }
 
   // Table 2: Compression ratio vs raw HTML
   console.log('');
   console.log('## Compression Ratio (% token reduction vs Raw HTML)');
   console.log('');
-  console.log('| Site | Cheliped | agent-browser | Playwright a11y |');
-  console.log('|------|----------|---------------|-----------------|');
+  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer |');
+  console.log('|------|----------|---------------|------------|-----------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
     const html = htmlBaseline.find(h => h.name === name);
-    const ch = cheliped.results.find(r => r.name === name);
-    const ab = agentBr.results.find(r => r.name === name);
-    const pw = playwrightRes.results.find(r => r.name === name);
+    const ch = find(cheliped.results, name);
+    const ab = find(agentBr.results, name);
+    const pw = find(playwrightRes.results, name);
+    const pp = find(puppeteerRes.results, name);
 
     const ratio = (tool, baseline) => {
       if (!tool?.success || !baseline?.htmlTokens) return '—';
       return ((1 - tool.outputTokens / baseline.htmlTokens) * 100).toFixed(1) + '%';
     };
 
-    console.log(`| ${name} | ${ratio(ch, html)} | ${ratio(ab, html)} | ${ratio(pw, html)} |`);
+    console.log(`| ${name} | ${ratio(ch, html)} | ${ratio(ab, html)} | ${ratio(pw, html)} | ${ratio(pp, html)} |`);
   }
 
   // Table 3: Speed — Observe/Snapshot
   console.log('');
   console.log('## Speed — DOM Extraction');
   console.log('');
-  console.log('| Site | Cheliped observe | agent-browser snapshot | Playwright a11y |');
-  console.log('|------|-----------------|----------------------|-----------------|');
+  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer |');
+  console.log('|------|----------|---------------|------------|-----------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
-    const ch = cheliped.results.find(r => r.name === name);
-    const ab = agentBr.results.find(r => r.name === name);
-    const pw = playwrightRes.results.find(r => r.name === name);
+    const ch = find(cheliped.results, name);
+    const ab = find(agentBr.results, name);
+    const pw = find(playwrightRes.results, name);
+    const pp = find(puppeteerRes.results, name);
 
-    const chMs = ch?.success ? formatMs(ch.observeTime) : '❌';
-    const abMs = ab?.success ? formatMs(ab.observeTime) : '❌';
-    const pwMs = pw?.success ? formatMs(pw.observeTime) : '❌';
+    const ms = r => r?.success ? formatMs(r.observeTime) : '❌';
 
-    console.log(`| ${name} | ${chMs} | ${abMs} | ${pwMs} |`);
+    console.log(`| ${name} | ${ms(ch)} | ${ms(ab)} | ${ms(pw)} | ${ms(pp)} |`);
   }
 
   // Table 4: Elements detected
   console.log('');
   console.log('## Interactive Elements Detected');
   console.log('');
-  console.log('| Site | Cheliped | agent-browser | Playwright a11y |');
-  console.log('|------|----------|---------------|-----------------|');
+  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer |');
+  console.log('|------|----------|---------------|------------|-----------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
-    const ch = cheliped.results.find(r => r.name === name);
-    const ab = agentBr.results.find(r => r.name === name);
-    const pw = playwrightRes.results.find(r => r.name === name);
+    const ch = find(cheliped.results, name);
+    const ab = find(agentBr.results, name);
+    const pw = find(playwrightRes.results, name);
+    const pp = find(puppeteerRes.results, name);
 
-    const chN = ch?.success ? ch.elementCount : '❌';
-    const abN = ab?.success ? ab.elementCount : '❌';
-    const pwN = pw?.success ? pw.elementCount : '❌';
+    const n = r => r?.success ? r.elementCount : '❌';
 
-    console.log(`| ${name} | ${chN} | ${abN} | ${pwN} |`);
+    console.log(`| ${name} | ${n(ch)} | ${n(ab)} | ${n(pw)} | ${n(pp)} |`);
   }
 
   // Summary
@@ -380,36 +437,37 @@ async function main() {
     return valid.reduce((s, r) => s + r[key], 0) / valid.length;
   };
 
-  const chAvgTokens = avg(cheliped.results, 'outputTokens');
-  const abAvgTokens = avg(agentBr.results, 'outputTokens');
-  const pwAvgTokens = avg(playwrightRes.results, 'outputTokens');
-
-  const chAvgObs = avg(cheliped.results, 'observeTime');
-  const abAvgObs = avg(agentBr.results, 'observeTime');
-  const pwAvgObs = avg(playwrightRes.results, 'observeTime');
+  const tools = [
+    { name: 'Cheliped', results: cheliped.results, launchTime: cheliped.launchTime, dep: 'ws (direct CDP, no Playwright/Puppeteer)' },
+    { name: 'agent-browser', results: agentBr.results, launchTime: agentBr.launchTime, dep: 'Rust binary (direct CDP)' },
+    { name: 'Playwright', results: playwrightRes.results, launchTime: playwrightRes.launchTime, dep: 'playwright (full browser framework)' },
+    { name: 'Puppeteer', results: puppeteerRes.results, launchTime: puppeteerRes.launchTime, dep: 'puppeteer (Google browser framework)' },
+  ];
 
   console.log('  Avg Output Tokens:');
-  if (chAvgTokens) console.log(`    Cheliped:       ${formatNumber(Math.round(chAvgTokens))} tok`);
-  if (abAvgTokens) console.log(`    agent-browser:  ${formatNumber(Math.round(abAvgTokens))} tok`);
-  if (pwAvgTokens) console.log(`    Playwright:     ${formatNumber(Math.round(pwAvgTokens))} tok`);
+  for (const t of tools) {
+    const v = avg(t.results, 'outputTokens');
+    if (v) console.log(`    ${t.name.padEnd(15)} ${formatNumber(Math.round(v))} tok`);
+  }
 
   console.log('');
   console.log('  Avg Observe/Snapshot Time:');
-  if (chAvgObs) console.log(`    Cheliped:       ${formatMs(chAvgObs)}`);
-  if (abAvgObs) console.log(`    agent-browser:  ${formatMs(abAvgObs)}`);
-  if (pwAvgObs) console.log(`    Playwright:     ${formatMs(pwAvgObs)}`);
+  for (const t of tools) {
+    const v = avg(t.results, 'observeTime');
+    if (v) console.log(`    ${t.name.padEnd(15)} ${formatMs(v)}`);
+  }
 
   console.log('');
   console.log('  Launch Time:');
-  console.log(`    Cheliped:       ${formatMs(cheliped.launchTime)}`);
-  console.log(`    agent-browser:  ${formatMs(agentBr.launchTime)} (includes first navigate)`);
-  if (playwrightRes.launchTime) console.log(`    Playwright:     ${formatMs(playwrightRes.launchTime)}`);
+  for (const t of tools) {
+    if (t.launchTime) console.log(`    ${t.name.padEnd(15)} ${formatMs(t.launchTime)}`);
+  }
 
   console.log('');
   console.log('  Dependencies:');
-  console.log('    Cheliped:       ws (direct CDP, no Playwright/Puppeteer)');
-  console.log('    agent-browser:  Rust binary (direct CDP, no Playwright/Puppeteer)');
-  console.log('    Playwright:     playwright (full browser automation framework)');
+  for (const t of tools) {
+    console.log(`    ${t.name.padEnd(15)} ${t.dep}`);
+  }
 
   console.log('');
   console.log('Done. 🦀');
