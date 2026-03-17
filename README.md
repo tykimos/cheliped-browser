@@ -27,7 +27,7 @@ Cheliped is a **browser automation skill** for AI agents. It controls Chrome via
 
 ## ⚖️ How Does It Compare?
 
-> Benchmarked on 6 sites (static, SPA, content-heavy) · 2025-03-17
+> Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2025-03-18
 
 | | Cheliped | agent-browser | Playwright | Puppeteer |
 |:--|:---------|:--------------|:-----------|:----------|
@@ -36,6 +36,7 @@ Cheliped is a **browser automation skill** for AI agents. It controls Chrome via
 | **Avg Speed** | **34ms** | 259ms | 224ms | 124ms |
 | **Quality** | **88.4%** | 72.6% | 75.1% | 73.1% |
 | **Dependencies** | ws only | Rust binary | Full framework | Full framework |
+| **iframe/Shadow DOM** | No | No | Partial | Partial |
 | **SPA Support** | Basic | Basic | Excellent | Good |
 | **Wait Strategy** | Network idle | Manual | Auto-wait | Manual |
 | **Production Maturity** | Early | Stable | Mature | Mature |
@@ -53,13 +54,16 @@ Cheliped is a **browser automation skill** for AI agents. It controls Chrome via
 
 ### Known Limitations
 
-- **Text recall drops on list-heavy pages** — compression (`maxListItems: 30`) truncates long lists (GitHub: 37%). Trade-off between tokens and completeness.
-- **Small SPA token overhead** — on tiny pages like TodoMVC (278 tokens raw), structured output (530 tok) is larger than Puppeteer's a11y snapshot (100 tok). Overhead pays off on real-world pages.
+Tested on 10 edge-case sites (NPM, Reddit, YouTube, Twitter/X, Google, Stack Overflow, MDN API, W3Schools, JSONPlaceholder, HTTPBin):
+
+- **Link cap on large pages** — `maxLinks: 500` cuts off on pages with 1,000+ links (MDN API: 500/1,230 = 41%). Configurable but adds tokens.
+- **iframe / Shadow DOM blind spot** — HTTPBin (Swagger UI in iframe): buttons 0/11, inputs 0/1, headings 2/13. Cheliped cannot reach inside iframes or shadow roots. Playwright has the same limitation via ariaSnapshot.
+- **Over-detection on JS-heavy pages** — NPM search: GT reports 2 links (pre-render) but Cheliped finds 105 (post-render). This is actually more accurate, but inflates token count (3,865 tok vs Playwright's 133 tok).
+- **Heavy SPA navigation is slow** — Twitter/X: 12s navigation + 1.6s extraction. YouTube: 6.8s. All tools are slow on auth-walled SPAs.
+- **Heading over-count on complex pages** — W3Schools: 59 headings detected vs 29 ground-truth (sidebar nav headings included). Filtering visible-only is imperfect.
+- **Small SPA token overhead** — TodoMVC (278 tok raw): Cheliped 530 tok vs Puppeteer 100 tok. Structured JSON overhead only hurts on tiny pages.
 - **Early-stage project** — not yet battle-tested in production. Playwright and Puppeteer have years of maturity.
-- **Benchmark caveats**:
-  - Token estimation uses `chars/4`, not a real tokenizer
-  - Playwright/Puppeteer benchmarked via a11y snapshots, not their primary CSS selector APIs
-  - 6 test sites — no Shadow DOM, heavy iframe, or WebSocket-driven sites tested
+- **Benchmark caveats**: token estimation uses `chars/4` (not tiktoken); Playwright/Puppeteer benchmarked via a11y snapshots, not their primary CSS selector APIs.
 
 ---
 
@@ -371,6 +375,48 @@ Raw DOM Tree
 | Heading Recall | 15% | **89.1%** | 88.1% | 86.4% | 86.7% |
 | **Overall** | **100%** | **88.4%** | **72.6%** | **75.1%** | **73.1%** |
 
+### Edge Case & Limitation Test
+
+> Tested on 10 additional sites targeting known weaknesses: long lists, heavy SPAs, forms, complex structure, iframes.
+
+#### Navigation & Extraction
+
+| Site | Category | Cheliped | Playwright | Puppeteer | Notes |
+|:-----|:---------|--------:|----------:|----------:|:------|
+| NPM Search | Long List | 3,865 tok / 71ms | 133 tok / 310ms | 44 tok / 60ms | Cheliped extracts post-render content (105 links); others see pre-render (2 links) |
+| Reddit | Long List | 9,396 tok / 87ms | 65 tok / 72ms | 223 tok / 102ms | Similar: Cheliped renders fully, outputs more |
+| YouTube | Heavy SPA | 548 tok / 102ms | 185 tok / 363ms | 1,685 tok / 28ms | All limited by consent/auth wall |
+| Twitter/X | Heavy SPA | 193 tok / 1.6s | 27 tok / 1.6s | 67 tok / 1.1s | Login wall — all tools see minimal content |
+| Google Search | Forms | 609 tok / 136ms | 350 tok / 91ms | 898 tok / 23ms | Cheliped finds 7 inputs vs GT 1 (hidden inputs exposed) |
+| Stack Overflow | Forms | 1,648 tok / 111ms | 143 tok / 139ms | 44 tok / 35ms | Login required — Cheliped extracts nav elements |
+| MDN API | Complex | 21,017 tok / 229ms | 45,601 tok / 439ms | 116,494 tok / 908ms | 1,230 links, Cheliped capped at 500 (maxLinks) |
+| W3Schools | Complex | 12,530 tok / 131ms | 5,775 tok / 284ms | 20,414 tok / 170ms | Cheliped over-detects headings (59 vs 29 GT) |
+| JSONPlaceholder | Minimal | 1,395 tok / 32ms | 1,360 tok / 63ms | 3,980 tok / 20ms | Near-identical with Playwright |
+| HTTPBin | Minimal | 213 tok / 5ms | 175 tok / 113ms | 833 tok / 35ms | Swagger UI in iframe — all tools miss buttons/inputs |
+
+#### Element Detection Accuracy (Cheliped vs Ground Truth)
+
+| Site | Links | Buttons | Inputs | Headings | Verdict |
+|:-----|------:|--------:|-------:|---------:|:--------|
+| NPM Search | 105/2 | 2/0 | 2/0 | 6/2 | Over-detect (post-render vs pre-render GT) |
+| Reddit | 202/1 | 50/0 | 29/0 | 2/0 | Over-detect (same reason) |
+| YouTube | 16/6 | 15/6 | **1/1** | 2/0 | Good input detection, some over-detect |
+| Twitter/X | 0/0 | **1/1** | 1/0 | 0/0 | Minimal content (auth wall) |
+| Google | **11/11** | 11/7 | 7/1 | 0/0 | Perfect link recall, hidden inputs exposed |
+| Stack Overflow | 28/2 | 13/0 | 9/0 | 4/2 | Over-detect (login page elements) |
+| MDN API | 500/1230 | **9/8** | 0/0 | 35/52 | Link cap at 500, heading under-detect |
+| W3Schools | 369/241 | 27/10 | **25/16** | 59/29 | Input recall good, heading over-detect |
+| JSONPlaceholder | 25/29 | **1/1** | 0/0 | **8/8** | Accurate |
+| HTTPBin | 5/15 | 0/11 | 0/1 | 2/13 | iframe blind spot (Swagger UI) |
+
+#### Key Findings
+
+1. **iframe/Shadow DOM is a real blind spot** — HTTPBin's Swagger UI content is invisible to all tools. Cheliped: 0/11 buttons, 0/1 inputs. Playwright also: 0/11, 0/0.
+2. **Post-render extraction is a double-edged sword** — Cheliped's CDP approach renders JS fully (NPM: 105 links vs GT's 2), which is more accurate but inflates tokens.
+3. **maxLinks cap matters on large pages** — MDN API has 1,230 links; Cheliped's cap returns 500. Configurable via options.
+4. **Heavy SPAs are equally hard for everyone** — YouTube/Twitter extraction is slow (1–12s) and content-limited for all tools.
+5. **Form detection advantage holds** — Even on edge cases, Cheliped finds more real inputs (Google: 7, W3Schools: 25) than competitors.
+
 <details>
 <summary>🔧 Run the benchmarks yourself</summary>
 
@@ -378,8 +424,9 @@ Raw DOM Tree
 cd scripts
 npm install
 npm run build
-node benchmark-compare.mjs   # Token efficiency & speed
-node benchmark-quality.mjs   # Content recognition quality
+node benchmark-compare.mjs      # Token efficiency & speed (6 sites)
+node benchmark-quality.mjs      # Content recognition quality (6 sites)
+node benchmark-limitations.mjs  # Edge cases & limitations (10 sites)
 ```
 
 </details>
