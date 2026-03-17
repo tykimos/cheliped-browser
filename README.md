@@ -148,6 +148,99 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 | **Wait Strategy** | Network idle | Manual | Auto-wait | Manual |
 | **Production Maturity** | Early | Stable | Mature | Mature |
 
+<details open>
+<summary><b>📊 Performance at a Glance</b></summary>
+
+<table>
+<tr>
+<td>
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    xyChart:
+      titleColor: "#333"
+      plotColorPalette: "#e74c3c, #3498db, #2ecc71, #f39c12"
+---
+xychart-beta
+    title "Average Output Tokens (lower is better)"
+    x-axis ["Cheliped", "Puppeteer", "Playwright", "agent-browser"]
+    y-axis "Tokens" 0 --> 14000
+    bar [2864, 5051, 5704, 11882]
+```
+
+</td>
+<td>
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    xyChart:
+      titleColor: "#333"
+      plotColorPalette: "#e74c3c, #3498db, #2ecc71, #f39c12"
+---
+xychart-beta
+    title "Extraction Speed in ms (lower is better)"
+    x-axis ["Cheliped", "Playwright", "Puppeteer", "agent-browser"]
+    y-axis "ms" 0 --> 250
+    bar [51, 78, 81, 205]
+```
+
+</td>
+</tr>
+<tr>
+<td colspan="2">
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    xyChart:
+      titleColor: "#333"
+      plotColorPalette: "#e74c3c, #3498db, #2ecc71, #f39c12"
+---
+xychart-beta
+    title "Content Recognition Quality % (higher is better)"
+    x-axis ["Cheliped", "Playwright", "Puppeteer", "agent-browser"]
+    y-axis "Score %" 0 --> 100
+    bar [86.4, 75.4, 73.4, 72.8]
+```
+
+</td>
+</tr>
+<tr>
+<td colspan="2">
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    xyChart:
+      titleColor: "#333"
+      plotColorPalette: "#e74c3c, #f39c12, #3498db, #2ecc71"
+---
+xychart-beta
+    title "Quality Breakdown by Metric %"
+    x-axis ["Text Recall", "Link Recall", "Link Precision", "Button Recall", "Input Recall", "Heading Recall"]
+    y-axis "Score %" 0 --> 100
+    bar "Cheliped" [80.8, 97.3, 85.6, 97.9, 67.9, 89.1]
+    bar "Playwright" [76.8, 85.0, 88.2, 82.4, 33.3, 86.4]
+    bar "Puppeteer" [76.2, 84.2, 87.8, 55.1, 50.0, 86.7]
+    bar "agent-browser" [77.7, 85.4, 90.5, 92.3, 1.2, 88.1]
+```
+
+</td>
+</tr>
+</table>
+
+</details>
+
 ### Strengths
 
 - **2–4x fewer tokens** than all competitors — directly reduces LLM API costs
@@ -411,6 +504,30 @@ Raw DOM Tree
 | MDN Web Docs | 24,929 | **2,912** | 11,203 | 5,901 | 3,717 |
 | **Average** | **39,343** | **2,864** | **11,882** | **5,704** | **5,051** |
 
+<details>
+<summary>📊 Per-Site Token Comparison Chart</summary>
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    xyChart:
+      titleColor: "#333"
+      plotColorPalette: "#e74c3c, #3498db, #2ecc71, #f39c12"
+---
+xychart-beta
+    title "Output Tokens per Site (lower is better)"
+    x-axis ["HN", "Wiki", "GitHub", "Example", "React", "MDN"]
+    y-axis "Tokens" 0 --> 40000
+    bar "Cheliped" [2497, 7281, 3863, 111, 521, 2912]
+    bar "Playwright" [10014, 15417, 2347, 58, 488, 5901]
+    bar "Puppeteer" [19744, 19744, 1592, 71, 388, 3717]
+    bar "agent-browser" [15300, 39475, 4180, 120, 1016, 11203]
+```
+
+</details>
+
 ### Speed — DOM Extraction
 
 | Site | Cheliped | agent-browser | Playwright | Puppeteer |
@@ -422,6 +539,30 @@ Raw DOM Tree
 | React (SPA) | **6ms** | 175ms | 28ms | 24ms |
 | MDN Web Docs | **52ms** | 214ms | 127ms | 77ms |
 | **Average** | **51ms** | **205ms** | **78ms** | **81ms** |
+
+<details>
+<summary>📊 Per-Site Speed Comparison Chart</summary>
+
+```mermaid
+---
+config:
+  theme: base
+  themeVariables:
+    xyChart:
+      titleColor: "#333"
+      plotColorPalette: "#e74c3c, #3498db, #2ecc71, #f39c12"
+---
+xychart-beta
+    title "Extraction Speed per Site in ms (lower is better)"
+    x-axis ["HN", "Wiki", "GitHub", "Example", "React", "MDN"]
+    y-axis "ms" 0 --> 300
+    bar "Cheliped" [46, 83, 113, 7, 6, 52]
+    bar "Playwright" [82, 86, 124, 23, 28, 127]
+    bar "Puppeteer" [72, 167, 112, 33, 24, 77]
+    bar "agent-browser" [209, 270, 188, 174, 175, 214]
+```
+
+</details>
 
 ### Content Recognition Quality
 
