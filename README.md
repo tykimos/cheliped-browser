@@ -95,7 +95,7 @@ Key design choices for Claude Code compatibility:
 3. **Multi-agent browsing** — `--session` flag lets different OpenClaw agents browse independently with isolated Chrome instances
 
 ```
-OpenClaw Agent: "어시, 해커뉴스 톱 3 뉴스 알려줘"
+OpenClaw Agent: "What are the top 3 stories on Hacker News?"
     │
     ▼
 OpenClaw: skill match → cheliped-browser → browser tool
@@ -104,7 +104,7 @@ OpenClaw: skill match → cheliped-browser → browser tool
 Cheliped: goto → observe → Agent DOM
     │
     ▼
-Agent: "현재 Hacker News 톱 3 뉴스: 1. ... 2. ... 3. ..."
+Agent: "The top 3 Hacker News stories are: 1. ... 2. ... 3. ..."
 ```
 
 ### Why Not Just Use Playwright/Puppeteer Directly?
