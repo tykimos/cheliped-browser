@@ -1,0 +1,43 @@
+{
+  "name": "cheliped-browser",
+  "version": "0.1.0",
+  "description": "Agent Browser Runtime — AI agent-friendly browser control via CDP",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "skills"],
+  "bin": {
+    "cheliped": "./skills/cheliped-browser/cheliped-cli.mjs"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "lint": "eslint src/",
+    "format": "prettier --write src/"
+  },
+  "dependencies": {
+    "ws": "^8.16.0",
+    "devtools-protocol": "^0.0.1596832"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "tsup": "^8.0.0",
+    "vitest": "^1.6.0",
+    "@types/ws": "^8.5.10",
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

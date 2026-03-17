@@ -1,0 +1,33 @@
+{
+  "url": "https://example.com/",
+  "title": "Test Page",
+  "buttons": [
+    { "id": 1, "text": "Login", "type": "submit" },
+    { "id": 2, "text": "Custom Button", "role": "button" }
+  ],
+  "links": [
+    { "id": 3, "text": "Home", "href": "/home" },
+    { "id": 4, "text": "About", "href": "/about" }
+  ],
+  "inputs": [
+    { "id": 5, "name": "email", "type": "email", "placeholder": "Enter email" },
+    { "id": 6, "name": "password", "type": "password", "placeholder": "Enter password" }
+  ],
+  "selects": [
+    { "id": 7, "name": "country" }
+  ],
+  "textareas": [
+    { "id": 8, "name": "message", "placeholder": "Your message" }
+  ],
+  "forms": [
+    { "id": 9 }
+  ],
+  "texts": [
+    { "id": 10, "text": "Welcome" },
+    { "id": 11, "text": "This is a test page." },
+    { "id": 12, "text": "Email" }
+  ],
+  "images": [
+    { "id": 13, "src": "/logo.png" }
+  ]
+}

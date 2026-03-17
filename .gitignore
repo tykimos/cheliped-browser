@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.omc/
+*.tsbuildinfo
+*.png
+/tmp/
+prd.md
+test-*.mjs
