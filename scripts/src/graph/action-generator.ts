@@ -9,7 +9,8 @@ export class ActionGenerator {
     actions.push(...this.generateFormActions(graph));
     actions.push(...this.generateNavigationActions(graph));
     actions.push(...this.generateClickActions(graph));
-    return actions;
+    // Filter low-confidence bulk actions, keep only high-value ones
+    return actions.filter(a => a.confidence >= 0.7);
   }
 
   private generateLoginActions(graph: UIGraph): SemanticAction[] {
@@ -153,9 +154,14 @@ export class ActionGenerator {
 
   private generateNavigationActions(graph: UIGraph): SemanticAction[] {
     const actions: SemanticAction[] = [];
+    const seenHrefs = new Set<string>();
 
     for (const node of graph.nodes) {
       if (node.type !== 'link' || !node.properties.href) continue;
+
+      const href = node.properties.href;
+      if (seenHrefs.has(href)) continue;
+      seenHrefs.add(href);
 
       actions.push({
         id: `open_link_${node.id}`,
@@ -163,7 +169,7 @@ export class ActionGenerator {
         label: `${node.label} -> ${node.properties.href}`,
         params: [],
         triggerNodeId: node.id,
-        confidence: 1.0,
+        confidence: 0.3,
       });
     }
 
@@ -188,7 +194,7 @@ export class ActionGenerator {
         label: `Click: ${node.label}`,
         params: [],
         triggerNodeId: node.id,
-        confidence: 1.0,
+        confidence: 0.4,
       });
     }
 
