@@ -1,188 +1,80 @@
 ---
 name: cheliped-browser
-description: "Agent Browser Runtime — browse, observe, and interact with any web page via Chrome DevTools Protocol (CDP). Use this skill when the agent needs to navigate websites, extract page content, fill forms, click buttons, take screenshots, or perform any browser-based task."
-version: 1.0.0
-license: MIT
+description: "Agent Browser Runtime for browsing, observing, and interacting with web pages via Chrome DevTools Protocol (CDP). Use this skill when Claude needs to: (1) navigate to and browse websites, (2) extract page content, text, or links from any URL, (3) fill forms or type into input fields, (4) click buttons or links on a page, (5) take screenshots of web pages, (6) execute JavaScript in a page context, (7) perform login or search actions on websites, (8) scrape or crawl web content, or any other browser-based task. Triggers on: browse, crawl, scrape, web page, website, navigate, open URL, screenshot a site, fill a form online, login to a site."
 ---
 
-# cheliped-browser — Agent Browser Runtime
+# Agent Browser Runtime
 
-Cheliped controls Chrome via the Chrome DevTools Protocol (CDP) and exposes an LLM-friendly view of web pages called **Agent DOM** — a compressed, semantically structured representation where every interactive element gets a numeric ID (`agentId`).
-
-## Quick Start
-
-All browser interactions go through the CLI wrapper. Each invocation accepts a JSON array of commands:
-
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]'
-```
-
-The first call launches Chrome automatically and saves a session. Subsequent calls reconnect to the same Chrome instance. Call `close` when done.
-
-**Always run the CLI from the skill's root directory.**
+Control Chrome via CDP. Extract **Agent DOM** — a compressed DOM where every interactive element gets a numeric `agentId`.
 
 ## Setup
 
-Before first use, install dependencies and build:
+Run once before first use:
 
 ```bash
 npm install && npm run build
 ```
 
-## The Observe-Act Loop
+## Core Workflow: Observe-Act Loop
 
-The core pattern for interacting with any web page:
-
-```
-1. goto <url>       → Load the page
-2. observe          → Extract Agent DOM, get agentIds
-3. Identify the agentId of the target element
-4. click / fill     → Perform the action
-5. observe          → Re-observe the changed page
-6. Repeat until goal is achieved
-```
-
-## Available Commands
-
-### `goto`
-Navigate to a URL. Waits for page load to complete.
 ```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://news.ycombinator.com"]}]'
-```
-Returns: `{ success: true, url, title }`
+# 1. Navigate and observe
+node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]'
 
-### `observe`
-Extract the current page's **Agent DOM**. Each interactive element gets a numeric `agentId`.
+# 2. Use agentId from observe output to interact
+node scripts/cheliped-cli.mjs '[{"cmd":"fill","args":["3","search term"]},{"cmd":"click","args":["4"]},{"cmd":"observe"}]'
+```
+
+First call auto-launches Chrome and saves session. Subsequent calls reconnect. Call `close` when done.
+
+## Commands
+
+| Command | Args | Returns |
+|---------|------|---------|
+| `goto` | `["url"]` | `{ success, url, title }` |
+| `observe` | none | `{ nodes, texts, links }` — `nodes[].id` = agentId |
+| `click` | `["agentId"]` | `{ success, action, agentId }` |
+| `fill` | `["agentId", "text"]` | `{ success, action, agentId }` |
+| `screenshot` | `["path"]` (optional) | `{ success, path, size }` |
+| `run-js` | `["expression"]` | `{ success, result }` |
+| `extract` | `["text"\|"links"\|"all"]` | `{ type, data }` |
+| `actions` | none | `[{ id, type, label, params }]` |
+| `perform` | `["actionId"]` + `"params":{...}` | `{ success, actionId }` |
+| `observe-graph` | none | `{ nodes, edges, forms }` |
+| `close` | none | `{ success }` |
+
+## Examples
+
+### Browse and extract content
+
 ```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"observe"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://news.ycombinator.com"]},{"cmd":"observe"}]'
 ```
-Returns: `{ nodes: [...], texts: [...], links: [...] }` — Use `nodes[].id` with `click`/`fill`.
 
-### `observe-graph`
-Get the page's **UI Graph** — a semantic structure of nodes, edges, and form groups.
+### Fill a form and submit
+
 ```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"observe-graph"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"observe"},{"cmd":"fill","args":["7","hello"]},{"cmd":"click","args":["8"]}]'
 ```
-Returns: `{ nodes: [...], edges: [...], forms: [...] }`
 
-### `actions`
-Get a list of **semantic actions** available on the page. Automatically detects login forms, search bars, submit buttons, etc.
+### Semantic action (login, search)
+
 ```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"actions"}]'
-```
-Returns: `[{ id, type, label, confidence, params, triggerNodeId }, ...]`
-
-### `click`
-Click an element by its Agent DOM ID. Must call `observe` or `observe-graph` first.
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"observe"},{"cmd":"click","args":["42"]}]'
-```
-Returns: `{ success: true, action: "click", agentId: 42 }`
-
-### `fill`
-Type text into an input field by its Agent DOM ID. Works with React/SPA apps.
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"observe"},{"cmd":"fill","args":["7","hello world"]}]'
-```
-Returns: `{ success: true, action: "fill", agentId: 7 }`
-
-### `perform`
-Execute a semantic action by its ID. Use with parameters from `actions` output.
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"perform","args":["login-form"],"params":{"email":"user@example.com","password":"pass123"}}]'
-```
-Returns: `{ success: true, actionId, actionType }`
-
-### `screenshot`
-Save the current screen as PNG. Defaults to `/tmp/cheliped-screenshot.png`.
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"screenshot","args":["/tmp/page.png"]}]'
-```
-Returns: `{ success: true, path: "/tmp/page.png", size: 12345 }`
-
-### `run-js`
-Execute JavaScript in the page context and return the result.
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"run-js","args":["document.title"]}]'
-```
-Returns: `{ success: true, result: "Page Title" }`
-
-### `extract`
-Extract specific data from the page. Types: `text`, `links`, `all`.
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"extract","args":["links"]}]'
-```
-Returns: `{ type: "links", data: [...] }`
-
-### `close`
-Terminate Chrome and delete the session file.
-```bash
-node scripts/cheliped-cli.mjs '[{"cmd":"close"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://example.com/login"]},{"cmd":"actions"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"perform","args":["login-form"],"params":{"email":"user@example.com","password":"pass"}}]'
 ```
 
-## Concurrent Sessions
-
-When multiple agents need to browse simultaneously, use `--session` to isolate each Chrome instance:
+### Concurrent sessions
 
 ```bash
 node scripts/cheliped-cli.mjs --session agent1 '[{"cmd":"goto","args":["https://site-a.com"]}]'
 node scripts/cheliped-cli.mjs --session agent2 '[{"cmd":"goto","args":["https://site-b.com"]}]'
 ```
 
-Each session gets its own Chrome process and session file.
+## Key Notes
 
-## Examples
-
-### Search on Hacker News
-
-```bash
-# Navigate and observe
-node scripts/cheliped-cli.mjs '[
-  {"cmd":"goto","args":["https://news.ycombinator.com"]},
-  {"cmd":"observe"}
-]'
-
-# Fill search input (agentId 3) and click search button (agentId 4)
-node scripts/cheliped-cli.mjs '[
-  {"cmd":"fill","args":["3","AI agents"]},
-  {"cmd":"click","args":["4"]},
-  {"cmd":"observe"}
-]'
-```
-
-### Login with Semantic Actions
-
-```bash
-# Discover actions on a login page
-node scripts/cheliped-cli.mjs '[
-  {"cmd":"goto","args":["https://example.com/login"]},
-  {"cmd":"actions"}
-]'
-
-# Execute the login action with parameters
-node scripts/cheliped-cli.mjs '[
-  {"cmd":"perform","args":["login-form"],"params":{"email":"user@example.com","password":"pass123"}}
-]'
-```
-
-## Tips
-
-- **agentId validity**: `agentId` values are only valid after `observe` or `observe-graph`. Re-observe after page changes.
-- **React/SPA sites**: `fill` uses native input value setters to bypass React's synthetic event system.
-- **Token efficiency**: Agent DOM is compressed by default — far fewer tokens than raw HTML.
-- **Session persistence**: Chrome stays alive until `close` is called. No restart needed between calls.
-
-## Output Format
-
-All commands output JSON to stdout. Success returns an array of results:
-```json
-[
-  { "cmd": "goto", "result": { "success": true, "url": "...", "title": "..." } },
-  { "cmd": "observe", "result": { "nodes": [...], "texts": [...], "links": [...] } }
-]
-```
-
-Error:
-```json
-{ "error": "Error message", "command": "failed-command" }
-```
+- Call `observe` before `click`/`fill` — agentIds are only valid after observation.
+- `fill` works with React/SPA apps (uses native input value setters).
+- Agent DOM is token-compressed — far fewer tokens than raw HTML.
+- Chrome persists between calls until `close`. No restart needed.
+- All output is JSON to stdout. Errors: `{ "error": "message" }`.
