@@ -13,9 +13,9 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist", "skills"],
+  "files": ["dist", "scripts", "SKILL.md", "LICENSE.txt"],
   "bin": {
-    "cheliped": "./skills/cheliped-browser/cheliped-cli.mjs"
+    "cheliped": "./scripts/cheliped-cli.mjs"
   },
   "scripts": {
     "build": "tsup",

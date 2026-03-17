@@ -8,14 +8,17 @@
 
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 import { writeFile } from 'fs/promises';
-import { resolve } from 'path';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 // 세션 파일: Chrome PID + 포트 정보를 저장 (세션별로 동적으로 설정됨)
 let SESSION_FILE = '/tmp/cheliped-session-default.json';
 const DEFAULT_SCREENSHOT = '/tmp/cheliped-screenshot.png';
 
-// Cheliped 프로젝트 경로 (개발 환경용)
-const CHELIPED_PROJECT = '/Users/tykimos/assi/cheliped-browser';
+// Cheliped project root (CLI is at scripts/, root is ../)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const CHELIPED_PROJECT = resolve(__dirname, '..');
 
 async function loadCheliped() {
   try {

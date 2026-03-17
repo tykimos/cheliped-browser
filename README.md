@@ -1,206 +1,113 @@
 # Cheliped Browser
 
-**Agent Browser Runtime** — Browse, observe, and interact with web pages through Chrome DevTools Protocol (CDP), designed for AI agents.
+**Agent Browser Runtime** — Give your AI agent the ability to browse, observe, and interact with any web page.
 
-Cheliped gives AI agents a structured, token-efficient view of any web page called **Agent DOM** — a compressed, semantically grouped DOM representation where every interactive element gets a numeric ID. Agents can then click, fill, and navigate using these IDs instead of parsing raw HTML.
+Cheliped is a browser automation skill for [Claude Code](https://claude.ai/claude-code) and [OpenClaw](https://openclaw.ai). It controls Chrome via the Chrome DevTools Protocol (CDP) and exposes an LLM-friendly view of web pages called **Agent DOM** — a compressed, semantically structured representation that strips visual noise and reduces token usage.
 
-## Features
-
-- **Agent DOM** — Compressed DOM with numeric IDs for every interactive element. Drastically reduces token usage compared to raw HTML.
-- **UI Graph & Semantic Actions** — Automatically detects high-level actions (login, search, submit) from page structure.
-- **React/SPA Compatible** — Uses native input value setters to bypass React's synthetic event system.
-- **Session Persistence** — Chrome stays alive between CLI calls; reconnects via CDP port.
-- **Concurrent Sessions** — Multiple agents can browse independently with isolated Chrome instances.
-- **Built-in Security** — Domain allowlists, prompt injection detection, and data exfiltration guards.
-- **Zero Dependencies on Puppeteer/Playwright** — Direct CDP communication over WebSocket.
-
-## Installation
+## Install as a Claude Code Skill
 
 ```bash
-npm install cheliped-browser
+# The repo IS the skill - just clone and register
+git clone https://github.com/tykimos/cheliped-browser.git ~/.claude/skills/cheliped-browser
+cd ~/.claude/skills/cheliped-browser && npm install && npm run build
 ```
 
-Requires **Node.js >= 20** and **Google Chrome** installed locally.
+Once installed, Claude Code can browse the web using the `/cheliped-browser` command or automatically when browsing tasks are detected.
 
-## Quick Start
+## How It Works
 
-### As a Library
-
-```typescript
-import { Cheliped } from 'cheliped-browser';
-
-const cheliped = new Cheliped({ headless: true });
-await cheliped.launch();
-
-// Navigate
-await cheliped.goto('https://news.ycombinator.com');
-
-// Get Agent DOM
-const dom = await cheliped.observe();
-console.log(dom.nodes);  // Interactive elements with agentId
-console.log(dom.texts);  // Page text content
-console.log(dom.links);  // All links with absolute URLs
-
-// Interact using agentId from observe()
-await cheliped.click(42);          // Click element
-await cheliped.fill(7, 'hello');   // Type into input
-
-// Clean up
-await cheliped.close();
-```
-
-### As a CLI
-
-All commands are passed as a JSON array:
+All browser interactions go through `scripts/cheliped-cli.mjs`. Each call accepts a JSON array of commands:
 
 ```bash
-node cheliped-cli.mjs '[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]'
 ```
 
-The first call launches Chrome automatically and saves a session file. Subsequent calls reconnect to the same Chrome instance.
-
-## CLI Commands
-
-| Command | Description | Returns |
-|---------|-------------|---------|
-| `launch` | Explicitly start Chrome (usually auto-started) | `{ success }` |
-| `goto` | Navigate to a URL | `{ success, url, title }` |
-| `observe` | Extract Agent DOM with numeric IDs | `{ nodes, texts, links }` |
-| `observe-graph` | Get UI graph (nodes, edges, forms) | `{ nodes, edges, forms }` |
-| `actions` | Detect semantic actions (login, search, etc.) | `[{ id, type, label, confidence, params }]` |
-| `click` | Click an element by agentId | `{ success, action, agentId }` |
-| `fill` | Type text into an input by agentId | `{ success, action, agentId }` |
-| `perform` | Execute a semantic action by ID | `{ success, actionId, actionType }` |
-| `screenshot` | Save current page as PNG | `{ success, path, size }` |
-| `run-js` | Execute JavaScript in page context | `{ success, result }` |
-| `extract` | Extract text, links, or all data | `{ type, data }` |
-| `close` | Quit Chrome and delete session | `{ success }` |
+- First call **launches Chrome** automatically and saves a session file
+- Subsequent calls **reconnect** to the same Chrome instance
+- Call `close` when done to terminate Chrome
 
 ## The Observe-Act Loop
 
-The core pattern for AI agent interaction:
+The core pattern for AI agent web interaction:
 
 ```
 1. goto <url>       → Load the page
-2. observe          → Extract Agent DOM, get agentIds
-3. Identify the agentId of the target element
+2. observe          → Extract Agent DOM with numeric agentIds
+3. Identify target element's agentId
 4. click / fill     → Perform the action
 5. observe          → Re-observe the changed page
-6. Repeat
+6. Repeat until goal is achieved
 ```
 
 ### Example: Search on Hacker News
 
 ```bash
-# Navigate and observe
-node cheliped-cli.mjs '[
+# Navigate and observe the page
+node scripts/cheliped-cli.mjs '[
   {"cmd":"goto","args":["https://news.ycombinator.com"]},
   {"cmd":"observe"}
 ]'
 
-# Find the search input agentId from observe output, then:
-node cheliped-cli.mjs '[
+# Use agentId from observe output to fill search and click
+node scripts/cheliped-cli.mjs '[
   {"cmd":"fill","args":["3","AI agents"]},
   {"cmd":"click","args":["4"]},
   {"cmd":"observe"}
 ]'
 ```
 
-### Example: Semantic Actions (High-Level)
+### Example: Using Semantic Actions
 
 ```bash
-# Discover available actions on a page
-node cheliped-cli.mjs '[
+# Discover available actions on a login page
+node scripts/cheliped-cli.mjs '[
   {"cmd":"goto","args":["https://example.com/login"]},
   {"cmd":"actions"}
 ]'
 
-# Execute an action with parameters
-node cheliped-cli.mjs '[
+# Execute the login action with parameters
+node scripts/cheliped-cli.mjs '[
   {"cmd":"perform","args":["login-form"],"params":{"email":"user@example.com","password":"pass123"}}
 ]'
 ```
 
-## Concurrent Usage
+## Available Commands
 
-When multiple agents need to browse simultaneously, use the `--session` flag to isolate each agent's Chrome instance:
+| Command | Description | Returns |
+|---------|-------------|---------|
+| `goto` | Navigate to a URL, wait for page load | `{ success, url, title }` |
+| `observe` | Extract Agent DOM with numeric IDs for every interactive element | `{ nodes, texts, links }` |
+| `observe-graph` | Get semantic UI graph (nodes, edges, forms) | `{ nodes, edges, forms }` |
+| `actions` | Auto-detect high-level actions (login, search, submit) | `[{ id, type, label, confidence }]` |
+| `click` | Click an element by its agentId | `{ success, action, agentId }` |
+| `fill` | Type text into an input field by agentId | `{ success, action, agentId }` |
+| `perform` | Execute a semantic action with parameters | `{ success, actionId, actionType }` |
+| `screenshot` | Capture current page as PNG | `{ success, path, size }` |
+| `run-js` | Execute JavaScript in page context | `{ success, result }` |
+| `extract` | Extract text, links, or all page data | `{ type, data }` |
+| `close` | Terminate Chrome and delete session | `{ success }` |
+
+## Concurrent Sessions
+
+Multiple agents can browse simultaneously with isolated Chrome instances:
 
 ```bash
-# Agent 1
-node cheliped-cli.mjs --session agent1 '[{"cmd":"goto","args":["https://example.com"]}]'
-
-# Agent 2 (independent Chrome process)
-node cheliped-cli.mjs --session agent2 '[{"cmd":"goto","args":["https://other.com"]}]'
-
-# Clean up individual sessions
-node cheliped-cli.mjs --session agent1 '[{"cmd":"close"}]'
-node cheliped-cli.mjs --session agent2 '[{"cmd":"close"}]'
+node scripts/cheliped-cli.mjs --session agent1 '[{"cmd":"goto","args":["https://site-a.com"]}]'
+node scripts/cheliped-cli.mjs --session agent2 '[{"cmd":"goto","args":["https://site-b.com"]}]'
 ```
 
-Each session gets its own session file (`/tmp/cheliped-session-<name>.json`) and Chrome process.
+Each session gets its own Chrome process and session file (`/tmp/cheliped-session-<name>.json`).
 
-## Architecture
+## Key Features
 
-```
-src/
-├── api/          # Cheliped main API class
-├── browser/      # Chrome process controller
-├── cdp/          # CDP connection, transport, launcher
-├── dom/          # Agent DOM builder, extractor, filter, compressor
-├── graph/        # UI graph builder, semantic action generator
-├── security/     # Domain allowlist, prompt injection, exfiltration guard
-├── session/      # Cookie persistence, session management
-└── types/        # TypeScript type definitions
-```
+- **Agent DOM** — Compressed DOM where every interactive element gets a numeric ID. Uses far fewer tokens than raw HTML.
+- **Semantic Actions** — Auto-detects login forms, search bars, and navigation patterns from page structure.
+- **React/SPA Compatible** — Uses native input value setters to work with React controlled components.
+- **Session Persistence** — Chrome stays alive between CLI calls; reconnects automatically.
+- **Zero Puppeteer/Playwright** — Direct CDP communication over WebSocket. Minimal dependencies.
+- **Built-in Security** — Domain allowlists, prompt injection detection, data exfiltration guards.
 
-### Key Concepts
-
-- **CDPTransport** — Raw WebSocket JSON-RPC communication with Chrome.
-- **AgentDomBuilder** — Transforms the full DOM tree into a compressed, grouped representation. Each interactive element (buttons, inputs, links, selects) gets a unique `agentId`.
-- **UIGraphBuilder** — Builds a semantic graph from DOM elements, identifying relationships between form fields, labels, and submit buttons.
-- **ActionGenerator** — Analyzes the UI graph to detect high-level actions (login forms, search bars, navigation) with confidence scores.
-- **TokenCompressor** — Truncates text content and limits link counts to minimize LLM token consumption.
-
-## Programmatic API
-
-```typescript
-import { Cheliped } from 'cheliped-browser';
-
-const cheliped = new Cheliped({
-  headless: true,
-  compression: { enabled: true, maxTextLength: 120, maxLinks: 50 },
-  // security: { allowedDomains: ['example.com'], enablePromptGuard: true },
-  // session: { profileName: 'my-session', persistCookies: true },
-});
-
-await cheliped.launch();
-
-// Navigation
-const page = await cheliped.goto('https://example.com');
-// page.url, page.title
-
-// Observation
-const dom = await cheliped.observe();           // Agent DOM
-const graph = await cheliped.observeGraph();     // UI Graph
-const actions = await cheliped.actions();        // Semantic actions
-
-// Interaction
-await cheliped.click(agentId);                   // Click
-await cheliped.fill(agentId, 'text');             // Fill input
-await cheliped.perform('action-id', { key: 'value' }); // Semantic action
-
-// Utilities
-const screenshot = await cheliped.screenshot();  // PNG buffer
-const result = await cheliped.runJs('document.title'); // Run JS
-const data = await cheliped.extract('links');     // Extract data
-
-// Session management
-await cheliped.detach();    // Disconnect WebSocket, keep Chrome alive
-await cheliped.reconnect(port); // Reconnect to existing Chrome
-await cheliped.close();     // Full shutdown
-```
-
-## Agent DOM Output Example
+## Agent DOM Output
 
 ```json
 {
@@ -209,66 +116,56 @@ await cheliped.close();     // Full shutdown
     { "id": 2, "tag": "button", "text": "Search" },
     { "id": 3, "tag": "a", "text": "About", "href": "https://example.com/about" }
   ],
-  "texts": [
-    "Welcome to Example",
-    "Search the web..."
-  ],
+  "texts": ["Welcome to Example", "Search the web..."],
   "links": [
-    { "text": "About", "href": "https://example.com/about" },
-    { "text": "Contact", "href": "https://example.com/contact" }
+    { "text": "About", "href": "https://example.com/about" }
   ]
 }
 ```
 
-## Tips
+## Architecture
 
-- **React/SPA sites**: The `fill` command uses native input value setters to bypass React's synthetic event system, ensuring compatibility with React-controlled components.
-- **Token efficiency**: Agent DOM is compressed by default. `observe` output uses significantly fewer tokens than raw HTML.
-- **agentId validity**: `agentId` values are only valid after calling `observe` or `observe-graph`. Re-observe after page changes.
-- **Session persistence**: Chrome stays alive in the background until `close` is called. No need to restart between sequential commands.
-
-## Using as a Claude Code / OpenClaw Skill
-
-Cheliped can be registered as a skill for [Claude Code](https://claude.ai/claude-code) or [OpenClaw](https://openclaw.ai), enabling AI agents to browse the web autonomously.
-
-Install the skill:
-
-```bash
-# Copy skill files
-cp -r skills/cheliped-browser ~/.claude/skills/cheliped-browser
-cp -r skills/cheliped-browser ~/.openclaw/skills/cheliped-browser
 ```
-
-Once installed, the AI agent can use `/cheliped-browser` or be triggered automatically when browsing tasks are detected.
-
-## Output Format
-
-All CLI commands output JSON to stdout.
-
-**Success:**
-```json
-[
-  { "cmd": "goto", "result": { "success": true, "url": "...", "title": "..." } },
-  { "cmd": "observe", "result": { "nodes": [], "texts": [], "links": [] } }
-]
-```
-
-**Error:**
-```json
-{ "error": "Error message", "command": "failed-command" }
+cheliped-browser/          # This IS the skill folder
+├── SKILL.md               # Skill definition (root level)
+├── scripts/
+│   └── cheliped-cli.mjs   # CLI wrapper
+├── src/                   # TypeScript source
+│   ├── api/               # Cheliped main API class
+│   ├── cdp/               # CDP connection, transport, Chrome launcher
+│   ├── dom/               # Agent DOM builder, extractor, filter, compressor
+│   ├── graph/             # UI graph builder, semantic action generator
+│   ├── security/          # Domain allowlist, prompt injection guard
+│   └── session/           # Cookie persistence, session management
+├── tests/                 # Unit and integration tests
+└── examples/              # Usage examples
 ```
 
 ## Development
 
 ```bash
-# Build
-npm run build
+npm install          # Install dependencies
+npm run build        # Build to dist/
+npm test             # Run unit tests
+npm run test:integration  # Run integration tests (requires Chrome)
+```
 
-# Run tests
-npm test
+## Using as a Library
 
-# Run integration tests (requires Chrome)
-npm run test:integration
+Cheliped can also be used programmatically:
+
+```typescript
+import { Cheliped } from 'cheliped-browser';
+
+const cheliped = new Cheliped({ headless: true });
+await cheliped.launch();
+await cheliped.goto('https://example.com');
+
+const dom = await cheliped.observe();
+await cheliped.click(dom.nodes[0].id);
+await cheliped.fill(7, 'hello');
+
+await cheliped.close();
 ```
 
 ## License
