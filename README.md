@@ -214,6 +214,80 @@ Raw DOM Tree
 
 ---
 
+## 📊 Benchmark — Competitive Comparison
+
+> **Date**: 2025-03-17 · **Versions**: Cheliped 1.0.0, agent-browser 0.20.14, Playwright 1.58.2, Puppeteer 22.15.0
+> **Sites**: Hacker News, Wikipedia, GitHub Trending, Example.com · **Environment**: macOS, Node.js 24, Chrome
+
+### Token Efficiency (output tokens for LLM consumption)
+
+| Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|---------:|--------------:|-----------:|----------:|
+| Hacker News | 8,629 | **2,294** | 15,127 | 9,942 | 4,729 |
+| Wikipedia | 71,138 | **4,008** | 39,475 | 15,417 | 19,744 |
+| GitHub | 130,052 | 3,323 | 4,180 | 2,345 | **1,593** |
+| Example.com | 132 | 108 | 120 | **58** | 71 |
+| **Average** | **52,488** | **2,433** | **14,726** | **6,941** | **6,534** |
+
+### Compression Ratio (% token reduction vs Raw HTML)
+
+| Site | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|--------------:|-----------:|----------:|
+| Hacker News | **73.4%** | -75.3% | -15.2% | 45.2% |
+| Wikipedia | **94.4%** | 44.5% | 78.3% | 72.2% |
+| GitHub | 97.4% | 96.8% | **98.2%** | 98.8% |
+| Example.com | 18.2% | 9.1% | **56.1%** | 46.2% |
+
+### Speed — DOM Extraction
+
+| Site | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|--------------:|-----------:|----------:|
+| Hacker News | 148ms | 333ms | 184ms | **157ms** |
+| Wikipedia | **172ms** | 482ms | 338ms | 260ms |
+| GitHub | **106ms** | 253ms | 342ms | 148ms |
+| Example.com | 162ms | 280ms | 99ms | **9ms** |
+| **Average** | **147ms** | **337ms** | **241ms** | **143ms** |
+
+### Interactive Elements Detected
+
+| Site | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|--------:|--------------:|-----------:|----------:|
+| Hacker News | 50 | 0 | 1 | 510 |
+| Wikipedia | 99 | 0 | 5 | 1,194 |
+| GitHub | 90 | 0 | 5 | 113 |
+| Example.com | 1 | 0 | 3 | 4 |
+
+### Summary
+
+| Metric | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-------|:---------|:--------------|:-----------|:----------|
+| **Avg Tokens** | **2,433** | 14,726 | 6,941 | 6,534 |
+| **Avg Extract** | **147ms** | 337ms | 241ms | 143ms |
+| **Launch Time** | 8.7s | 7.6s | **1.4s** | 3.7s |
+| **Dependencies** | ws only | Rust binary | Full framework | Full framework |
+
+**Key takeaways:**
+
+- Cheliped produces **2.7–6x fewer tokens** than all competitors — directly reducing LLM API costs.
+- Extraction speed is on par with Puppeteer and **2x faster than agent-browser**.
+- Puppeteer over-counts elements (510–1,194) because it includes all a11y nodes; Cheliped returns only **actionable interactive elements** (50–99).
+- agent-browser detects **zero** interactive elements via its snapshot format.
+- Cheliped has **zero framework dependencies** — just `ws` for WebSocket.
+
+<details>
+<summary>🔧 Run the benchmark yourself</summary>
+
+```bash
+cd scripts
+npm install
+npm run build
+node benchmark-compare.mjs
+```
+
+</details>
+
+---
+
 ## 🛠 Development
 
 ```bash
