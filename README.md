@@ -245,48 +245,103 @@ Raw DOM Tree
 
 ### Content Recognition Quality
 
-> Ground truth collected via Playwright `page.evaluate()` (visible elements, computed styles).
+> Ground truth: actual visible elements collected via Playwright `page.evaluate()` with computed styles.
 > Scoring: Text 25% + Link Recall 20% + Link Precision 10% + Button 15% + Input 15% + Heading 15%
 
-| Metric | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-------|--------:|--------------:|-----------:|----------:|
-| Text Recall | **81.7%** | 77.5% | 76.6% | 75.9% |
-| Link Recall | **97.3%** | 84.9% | 84.3% | 83.1% |
-| Link Precision | 85.6% | **90.1%** | 87.8% | 87.1% |
-| Button Recall | **97.9%** | 92.3% | 82.4% | 55.1% |
-| Input Recall | **79.8%** | 1.2% | 33.3% | 50.0% |
-| Heading Recall | **89.1%** | 88.1% | 86.4% | 86.7% |
-| **Overall** | **88.4%** | **72.6%** | **75.1%** | **73.1%** |
+#### Ground Truth (what's actually on each page)
 
-<details>
-<summary>📋 Per-site detail: Button / Input / Heading detection</summary>
+| Site | Type | Visible Texts | Links | Buttons | Inputs | Headings |
+|:-----|:-----|-------------:|------:|--------:|-------:|---------:|
+| Hacker News | Static HTML | 250 | 198 | 0 | 1 | 0 |
+| Wikipedia | Static + Forms | 1,370 | 500 | 22 | 14 | 12 |
+| GitHub | SPA-like | 1,087 | 45 | 12 | 0 | 14 |
+| Example.com | Minimal | 3 | 1 | 0 | 0 | 1 |
+| React TodoMVC | React SPA | 23 | 11 | 0 | 1 | 2 |
+| MDN Web Docs | Content-heavy | 582 | 354 | 8 | 0 | 10 |
 
-**Button Detection** (found / ground-truth)
+#### Text Recall (% of visible text fragments recognized)
 
 | Site | Cheliped | agent-browser | Playwright | Puppeteer |
 |:-----|--------:|--------------:|-----------:|----------:|
-| Wikipedia | **21/22** | 21/22 | 8/22 | 3/22 |
-| GitHub | **11/12** | 7/12 | 7/12 | 2/12 |
-| MDN Web Docs | **8/8** | 8/8 | 8/8 | 0/8 |
+| Hacker News | 89.0% | 89.0% | 89.0% | 89.0% |
+| Wikipedia | 83.0% | **95.0%** | 90.0% | 90.0% |
+| GitHub | **37.0%** | 12.0% | 12.0% | 8.5% |
+| Example.com | **100.0%** | **100.0%** | **100.0%** | **100.0%** |
+| React (SPA) | 91.3% | **100.0%** | **100.0%** | **100.0%** |
+| MDN Web Docs | **90.0%** | 69.0% | 68.5% | 68.0% |
+| **Average** | **81.7%** | 77.5% | 76.6% | 75.9% |
 
-**Input Field Detection** (found / ground-truth)
+> Cheliped leads overall but loses on Wikipedia (compression truncates) and GitHub (list item limit).
+> All tools struggle with GitHub — dynamic rendering hides content from all extraction methods.
 
-| Site | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|--------:|--------------:|-----------:|----------:|
-| Hacker News | **1/1** | 0/1 | 0/1 | 0/1 |
-| Wikipedia | **11/14** | 1/14 | 0/14 | 0/14 |
-| React (SPA) | **1/1** | 0/1 | 0/1 | 0/1 |
+#### Link Detection
 
-**Heading Detection** (found / ground-truth)
+| Site | | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|:--|--------:|--------------:|-----------:|----------:|
+| Hacker News | Recall | **100%** | **100%** | 98% | 99% |
+| | Precision | **100%** | **100%** | 87% | 86% |
+| Wikipedia | Recall | 84% | 84% | 84% | 84% |
+| | Precision | 84% | **95%** | **95%** | **95%** |
+| GitHub | Recall | **100%** | 78% | 78% | 69% |
+| | Precision | 34% | **45%** | **45%** | 41% |
+| Example.com | Recall | **100%** | **100%** | **100%** | **100%** |
+| | Precision | **100%** | **100%** | **100%** | **100%** |
+| React (SPA) | Recall | **100%** | **100%** | **100%** | **100%** |
+| | Precision | **100%** | **100%** | **100%** | **100%** |
+| MDN Web Docs | Recall | **100%** | 48% | 46% | 46% |
+| | Precision | **96%** | **100%** | **100%** | **100%** |
+| **Average** | **Recall** | **97.3%** | 84.9% | 84.3% | 83.1% |
+| | **Precision** | 85.6% | **90.1%** | 87.8% | 87.1% |
 
-| Site | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|--------:|--------------:|-----------:|----------:|
-| Wikipedia | **11/12** | **12/12** | **12/12** | 11/12 |
-| GitHub | **6/14** | 4/14 | 4/14 | 4/14 |
-| MDN Web Docs | **10/10** | **10/10** | 9/10 | **10/10** |
-| React (SPA) | **2/2** | **2/2** | **2/2** | **2/2** |
+> Cheliped finds the most links (97.3% recall) but has lower precision on GitHub due to over-detection from expanded link extraction.
 
-</details>
+#### Button Detection (found / ground-truth buttons)
+
+| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|:-----------:|--------:|--------------:|-----------:|----------:|
+| Wikipedia | 22 | **21** (95%) | 21 (95%) | 8 (36%) | 3 (14%) |
+| GitHub | 12 | **11** (92%) | 7 (58%) | 7 (58%) | 2 (17%) |
+| MDN Web Docs | 8 | **8** (100%) | **8** (100%) | **8** (100%) | 0 (0%) |
+| **Average** | | **97.9%** | 92.3% | 82.4% | 55.1% |
+
+> Cheliped detects nearly all buttons. Puppeteer misses most — its a11y tree often classifies buttons differently.
+
+#### Input Field Detection (found / ground-truth inputs)
+
+| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|:-----------:|--------:|--------------:|-----------:|----------:|
+| Hacker News | 1 | **1** (100%) | 0 (0%) | 0 (0%) | 0 (0%) |
+| Wikipedia | 14 | **11** (79%) | 1 (7%) | 0 (0%) | 0 (0%) |
+| React (SPA) | 1 | **1** (100%) | 0 (0%) | 0 (0%) | 0 (0%) |
+| **Average** | | **79.8%** | 1.2% | 33.3% | 50.0% |
+
+> This is Cheliped's biggest advantage. Other tools' a11y/snapshot formats lose most input fields.
+> agent-browser detects 482–1,407 "inputs" per page (false positives from its text format) but matches only 1.2% of real ones.
+
+#### Heading Detection (found / ground-truth headings)
+
+| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-----|:-----------:|--------:|--------------:|-----------:|----------:|
+| Wikipedia | 12 | 11 (92%) | **12** (100%) | **12** (100%) | 11 (92%) |
+| GitHub | 14 | **6** (43%) | 4 (29%) | 4 (29%) | 4 (29%) |
+| Example.com | 1 | **1** (100%) | **1** (100%) | **1** (100%) | **1** (100%) |
+| React (SPA) | 2 | **2** (100%) | **2** (100%) | **2** (100%) | **2** (100%) |
+| MDN Web Docs | 10 | **10** (100%) | **10** (100%) | 9 (90%) | **10** (100%) |
+| **Average** | | **89.1%** | 88.1% | 86.4% | 86.7% |
+
+> All tools perform similarly on headings. GitHub is hard for everyone (dynamic rendering hides headings).
+
+#### Overall Quality Score
+
+| Metric | Weight | Cheliped | agent-browser | Playwright | Puppeteer |
+|:-------|------:|---------:|--------------:|-----------:|----------:|
+| Text Recall | 25% | **81.7%** | 77.5% | 76.6% | 75.9% |
+| Link Recall | 20% | **97.3%** | 84.9% | 84.3% | 83.1% |
+| Link Precision | 10% | 85.6% | **90.1%** | 87.8% | 87.1% |
+| Button Recall | 15% | **97.9%** | 92.3% | 82.4% | 55.1% |
+| Input Recall | 15% | **79.8%** | 1.2% | 33.3% | 50.0% |
+| Heading Recall | 15% | **89.1%** | 88.1% | 86.4% | 86.7% |
+| **Overall** | **100%** | **88.4%** | **72.6%** | **75.1%** | **73.1%** |
 
 ---
 
