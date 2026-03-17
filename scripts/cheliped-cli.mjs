@@ -84,7 +84,7 @@ async function getConnectedCheliped(Cheliped, session) {
   const cheliped = new Cheliped({
     headless: true,
     stealth: true,
-    compression: { enabled: true, maxTextLength: 120, maxLinks: 50 },
+    compression: { enabled: true, maxTextLength: 512, maxLinks: 50 },
   });
 
   if (session && session.port) {

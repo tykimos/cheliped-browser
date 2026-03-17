@@ -4,7 +4,7 @@ import type { AgentDom } from '../types/agent-dom.types.js';
 
 const DEFAULTS: Required<CompressionOptions> = {
   enabled: true,
-  maxTextLength: 300,
+  maxTextLength: 512,
   maxListItems: 30,
   maxLinks: 5000,
   maxImages: 10,

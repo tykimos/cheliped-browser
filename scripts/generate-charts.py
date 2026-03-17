@@ -61,21 +61,21 @@ tools = ['Cheliped', 'Playwright', 'Puppeteer', 'agent-browser']
 colors = [COLORS[t] for t in tools]
 
 # 1a. Avg Tokens (lower is better)
-vals = [2864, 5704, 5051, 11882]
+vals = [3512, 5706, 5051, 11950]
 bars = axes[0].bar(tools, vals, color=colors, width=0.6, edgecolor='white', linewidth=0.5)
 style_ax(axes[0], 'Average Output Tokens', 'Tokens', direction='lower')
 axes[0].set_ylim(0, max(vals) * 1.18)
 add_value_labels(axes[0], bars)
 
 # 1b. Avg Speed (lower is better)
-vals = [51, 78, 81, 205]
+vals = [40, 66, 82, 200]
 bars = axes[1].bar(tools, vals, color=colors, width=0.6, edgecolor='white', linewidth=0.5)
 style_ax(axes[1], 'Average Extraction Speed', 'ms', direction='lower')
 axes[1].set_ylim(0, max(vals) * 1.18)
 add_value_labels(axes[1], bars)
 
 # 1c. Quality Score (higher is better)
-vals = [86.4, 75.4, 73.4, 72.8]
+vals = [88.9, 75.6, 73.7, 72.9]
 bars = axes[2].bar(tools, vals, color=colors, width=0.6, edgecolor='white', linewidth=0.5)
 style_ax(axes[2], 'Content Recognition Quality', 'Score %', direction='higher')
 axes[2].set_ylim(0, 105)
@@ -98,10 +98,10 @@ fig, ax = plt.subplots(figsize=(14, 6.5))
 
 metrics = ['Text\nRecall', 'Link\nRecall', 'Link\nPrecision', 'Button\nRecall', 'Input\nRecall', 'Heading\nRecall']
 data = {
-    'Cheliped':       [80.8, 97.3, 85.6, 97.9, 67.9, 89.1],
-    'Playwright':     [76.8, 85.0, 88.2, 82.4, 33.3, 86.4],
-    'Puppeteer':      [76.2, 84.2, 87.8, 55.1, 50.0, 86.7],
-    'agent-browser':  [77.7, 85.4, 90.5, 92.3,  1.2, 88.1],
+    'Cheliped':       [82.0, 97.3, 85.6, 97.9, 79.8, 91.5],
+    'Playwright':     [76.8, 85.8, 88.9, 82.4, 33.3, 86.4],
+    'Puppeteer':      [76.1, 85.4, 88.5, 55.1, 50.0, 86.7],
+    'agent-browser':  [77.6, 86.1, 90.9, 92.3,  1.2, 88.1],
 }
 
 x = np.arange(len(metrics))
@@ -137,10 +137,10 @@ fig, ax = plt.subplots(figsize=(14, 6.5))
 
 sites = ['Hacker\nNews', 'Wikipedia', 'GitHub', 'Example\n.com', 'React\n(SPA)', 'MDN\nWeb Docs']
 data = {
-    'Cheliped':       [2497, 7281, 3863, 111, 521, 2912],
-    'Playwright':     [10014, 15417, 2347, 58, 488, 5901],
-    'Puppeteer':      [4795, 19744, 1592, 71, 388, 3717],
-    'agent-browser':  [15300, 39475, 4180, 120, 1016, 11203],
+    'Cheliped':       [2631, 7287, 3871, 128, 539, 3645],
+    'Playwright':     [10022, 15417, 2347, 58, 488, 5901],
+    'Puppeteer':      [4796, 19744, 1592, 71, 388, 3717],
+    'agent-browser':  [15306, 39475, 4180, 120, 1016, 11601],
 }
 
 x = np.arange(len(sites))
@@ -167,10 +167,10 @@ plt.close()
 fig, ax = plt.subplots(figsize=(14, 6.5))
 
 data = {
-    'Cheliped':       [46, 83, 113, 7, 6, 52],
-    'Playwright':     [82, 86, 124, 23, 28, 127],
-    'Puppeteer':      [72, 167, 112, 33, 24, 77],
-    'agent-browser':  [209, 270, 188, 174, 175, 214],
+    'Cheliped':       [28, 98, 53, 4, 2, 20],
+    'Playwright':     [64, 67, 113, 24, 27, 100],
+    'Puppeteer':      [94, 169, 102, 15, 14, 97],
+    'agent-browser':  [222, 260, 193, 165, 168, 192],
 }
 
 for i, (name, vals) in enumerate(data.items()):

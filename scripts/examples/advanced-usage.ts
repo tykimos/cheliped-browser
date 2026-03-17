@@ -9,7 +9,7 @@ async function main() {
     headless: true,
     compression: {
       enabled: true,
-      maxTextLength: 80,
+      maxTextLength: 512,
       maxLinks: 10,
     },
     security: {

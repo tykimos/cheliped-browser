@@ -152,7 +152,7 @@ async function getChelipedOutput(targets) {
 
   const cheliped = new Cheliped({
     headless: true,
-    compression: { enabled: true, maxTextLength: 120, maxLinks: 500 },
+    compression: { enabled: true, maxTextLength: 512, maxLinks: 500 },
   });
   await cheliped.launch();
 
@@ -181,7 +181,7 @@ async function getChelipedOutput(targets) {
           placeholder: i.placeholder || '',
         })),
         images: (dom.images || []).map(i => ({ alt: i.alt || i.text || '', src: i.src || '' })),
-        headings: (dom.texts || []).filter(t => t.tag === 'h1' || t.tag === 'h2' || t.tag === 'h3').map(t => t.text || ''),
+        headings: [...(dom.texts || []), ...(dom.links || []), ...(dom.buttons || [])].filter(t => t.tag === 'h1' || t.tag === 'h2' || t.tag === 'h3').map(t => t.text || ''),
         allText,
         success: true,
       });

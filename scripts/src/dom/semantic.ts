@@ -4,6 +4,7 @@ const TEXT_TAGS = new Set([
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'p', 'li', 'td', 'th', 'label', 'span',
   'blockquote', 'figcaption',
+  'dt', 'dd', 'caption', 'summary', 'address', 'pre',
 ]);
 
 const ROLE_CATEGORY_MAP: Record<string, SemanticElement['category']> = {
@@ -25,7 +26,7 @@ export class SemanticExtractor {
     } else {
       this.walk(node, results);
     }
-    return this.deduplicateHeadings(results);
+    return this.deduplicateTexts(this.deduplicateHeadings(results));
   }
 
   private deduplicateHeadings(elements: SemanticElement[]): SemanticElement[] {
@@ -36,6 +37,20 @@ export class SemanticExtractor {
       if (!text) return false; // drop empty headings
       if (seenHeadingTexts.has(text)) return false; // duplicate
       seenHeadingTexts.add(text);
+      return true;
+    });
+  }
+
+  /** Remove non-heading text elements with duplicate text content. Headings are preserved. */
+  private deduplicateTexts(elements: SemanticElement[]): SemanticElement[] {
+    const seenTexts = new Set<string>();
+    return elements.filter((el) => {
+      if (el.category !== 'text') return true;
+      if (el.tag) return true; // preserve headings (h1-h6)
+      const text = (el.text ?? '').trim();
+      if (!text) return false;
+      if (seenTexts.has(text)) return false;
+      seenTexts.add(text);
       return true;
     });
   }
@@ -51,6 +66,12 @@ export class SemanticExtractor {
         el.formBackendNodeId = currentFormId;
       }
       results.push(el);
+      // If a link wraps a heading (e.g. <a><h2>Title</h2></a>), preserve heading tag
+      if (el.category === 'link' && !el.tag) {
+        const headingTag = this.findHeadingTag(node);
+        if (headingTag) el.tag = headingTag;
+      }
+
       // Recurse into text-category containers (p, li, td, etc.) and forms
       // to find interactive elements (links, buttons) nested within them.
       // Skip recursing into leaves like button, input, a, img to avoid duplicates.
@@ -128,6 +149,19 @@ export class SemanticExtractor {
     if (Object.keys(attributes).length > 0) el.attributes = { ...attributes };
 
     return el;
+  }
+
+  /** Find a heading tag (h1-h6) among the immediate or nested children of a node. */
+  private findHeadingTag(node: InternalDomNode): string | null {
+    for (const child of node.children) {
+      if (child.nodeType === 1 && /^h[1-6]$/.test(child.tagName)) {
+        return child.tagName;
+      }
+      // Check one level deeper (e.g. <a><div><h2>...</h2></div></a>)
+      const nested = this.findHeadingTag(child);
+      if (nested) return nested;
+    }
+    return null;
   }
 
   private getTextContent(node: InternalDomNode): string {
