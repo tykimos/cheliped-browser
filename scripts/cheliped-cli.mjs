@@ -18,7 +18,7 @@ const DEFAULT_SCREENSHOT = '/tmp/cheliped-screenshot.png';
 // Cheliped project root (CLI is at scripts/, root is ../)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-const CHELIPED_PROJECT = resolve(__dirname, '..');
+const CHELIPED_PROJECT = __dirname;
 
 async function loadCheliped() {
   try {
@@ -83,6 +83,7 @@ function killChrome(pid) {
 async function getConnectedCheliped(Cheliped, session) {
   const cheliped = new Cheliped({
     headless: true,
+    stealth: true,
     compression: { enabled: true, maxTextLength: 120, maxLinks: 50 },
   });
 
@@ -146,6 +147,28 @@ async function executeCommand(cheliped, cmdObj) {
       if (isNaN(agentId)) throw new Error('fill: 유효한 agentId(숫자)가 필요합니다.');
       if (text === undefined) throw new Error('fill: 입력할 텍스트가 필요합니다.');
       return await cheliped.fill(agentId, text);
+    }
+
+    case 'fill-human': {
+      const agentId = parseInt(args[0], 10);
+      const text = args[1];
+      if (isNaN(agentId)) throw new Error('fill-human: 유효한 agentId(숫자)가 필요합니다.');
+      if (text === undefined) throw new Error('fill-human: 입력할 텍스트가 필요합니다.');
+      return await cheliped.fillHuman(agentId, text);
+    }
+
+    case 'select': {
+      const agentId = parseInt(args[0], 10);
+      const value = args[1];
+      if (isNaN(agentId)) throw new Error('select: 유효한 agentId(숫자)가 필요합니다.');
+      if (value === undefined) throw new Error('select: 선택할 값이 필요합니다.');
+      return await cheliped.selectOption(agentId, value);
+    }
+
+    case 'wait': {
+      const ms = parseInt(args[0] || '1000', 10);
+      await new Promise(resolve => setTimeout(resolve, ms));
+      return { success: true, action: 'wait', ms };
     }
 
     case 'perform': {

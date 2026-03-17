@@ -137,6 +137,8 @@ export class ChromeLauncher {
     const headless = options.headless !== false;
     const timeout = options.timeout ?? 10_000;
 
+    const stealth = options.stealth !== false; // default: true
+
     const args: string[] = [
       `--remote-debugging-port=${port}`,
       '--no-first-run',
@@ -147,12 +149,26 @@ export class ChromeLauncher {
       `--user-data-dir=${this.userDataDir}`,
     ];
 
+    // Stealth: anti-detection flags
+    if (stealth) {
+      args.push(
+        '--disable-blink-features=AutomationControlled',
+        '--disable-features=AutomationControlled',
+        '--disable-infobars',
+        '--disable-dev-shm-usage',
+        '--lang=ko-KR,ko',
+      );
+    }
+
     if (headless) {
       args.push('--headless=new');
     }
 
     if (options.viewport) {
       args.push(`--window-size=${options.viewport.width},${options.viewport.height}`);
+    } else if (stealth) {
+      // Stealth: use a realistic window size instead of default
+      args.push('--window-size=1920,1080');
     }
 
     this.process = spawn(chromePath, args, {

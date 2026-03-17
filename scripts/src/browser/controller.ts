@@ -174,6 +174,106 @@ export class BrowserController {
     });
   }
 
+  /**
+   * Human-like typing: focus the element, clear it, then type character by character
+   * with random delays between keystrokes (50–150ms).
+   */
+  async fillHumanByBackendNodeId(backendNodeId: number, text: string): Promise<void> {
+    // 1. Resolve node to get RemoteObject
+    const resolveResult = await this.transport.send('DOM.resolveNode', {
+      backendNodeId,
+    }) as Record<string, unknown>;
+
+    const remoteObject = resolveResult.object as Record<string, unknown>;
+    const objectId = remoteObject.objectId as string;
+
+    // 2. Focus the element
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() { this.focus(); this.value = ''; }`,
+      returnByValue: true,
+    });
+
+    // 3. Click the element to ensure it's active
+    try {
+      const boxResult = await this.transport.send('DOM.getBoxModel', {
+        backendNodeId,
+      }) as Record<string, unknown>;
+      const model = boxResult.model as Record<string, unknown>;
+      const content = model.content as number[];
+      const x = (content[0] + content[2] + content[4] + content[6]) / 4;
+      const y = (content[1] + content[3] + content[5] + content[7]) / 4;
+      await this._dispatchClick(x, y);
+    } catch {
+      // fallback: just focus
+    }
+
+    // 4. Type character by character with random delays
+    for (const char of text) {
+      await this.transport.send('Input.dispatchKeyEvent', {
+        type: 'keyDown',
+        text: char,
+        key: char,
+        code: `Key${char.toUpperCase()}`,
+        unmodifiedText: char,
+      });
+      await this.transport.send('Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: char,
+        code: `Key${char.toUpperCase()}`,
+      });
+
+      // Random delay: 50–150ms
+      const delay = 50 + Math.floor(Math.random() * 100);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    // 5. Dispatch input and change events
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        this.dispatchEvent(new Event('input', { bubbles: true }));
+        this.dispatchEvent(new Event('change', { bubbles: true }));
+      }`,
+      returnByValue: true,
+    });
+  }
+
+  /**
+   * Select an option from a <select> element by its visible text or value.
+   * Dispatches proper change events.
+   */
+  async selectByBackendNodeId(backendNodeId: number, optionValue: string): Promise<void> {
+    const resolveResult = await this.transport.send('DOM.resolveNode', {
+      backendNodeId,
+    }) as Record<string, unknown>;
+
+    const remoteObject = resolveResult.object as Record<string, unknown>;
+    const objectId = remoteObject.objectId as string;
+
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `
+        function(targetValue) {
+          // Try matching by value first, then by text content
+          let found = false;
+          for (const opt of this.options) {
+            if (opt.value === targetValue || opt.textContent.trim() === targetValue) {
+              this.value = opt.value;
+              found = true;
+              break;
+            }
+          }
+          if (!found) throw new Error('Option not found: ' + targetValue);
+          this.dispatchEvent(new Event('change', { bubbles: true }));
+          this.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      `,
+      arguments: [{ value: optionValue }],
+      returnByValue: true,
+    });
+  }
+
   async runJs(script: string): Promise<unknown> {
     const result = await this.transport.send('Runtime.evaluate', {
       expression: script,

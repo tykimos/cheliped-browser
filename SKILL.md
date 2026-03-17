@@ -12,7 +12,7 @@ Control Chrome via CDP. Extract **Agent DOM** — a compressed DOM where every i
 Run once before first use:
 
 ```bash
-npm install && npm run build
+cd scripts && npm install && npm run build
 ```
 
 ## Core Workflow: Observe-Act Loop

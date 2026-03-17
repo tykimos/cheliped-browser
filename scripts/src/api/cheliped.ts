@@ -176,6 +176,28 @@ export class Cheliped {
     return this.act(agentId, 'fill', value);
   }
 
+  /** Human-like typing: types character by character with random delays (50-150ms). */
+  async fillHuman(agentId: number, value: string): Promise<ActResult> {
+    this.ensureLaunched();
+    const backendNodeId = this.agentDomBuilder.resolveAgentId(agentId);
+    if (backendNodeId === undefined) {
+      throw new Error(`Agent DOM ID ${agentId} not found. Call observe() first to get current Agent DOM.`);
+    }
+    await this.controller!.fillHumanByBackendNodeId(backendNodeId, value);
+    return { success: true, action: 'fill', agentId };
+  }
+
+  /** Select a <select> option by visible text or value. */
+  async selectOption(agentId: number, optionValue: string): Promise<ActResult> {
+    this.ensureLaunched();
+    const backendNodeId = this.agentDomBuilder.resolveAgentId(agentId);
+    if (backendNodeId === undefined) {
+      throw new Error(`Agent DOM ID ${agentId} not found. Call observe() first to get current Agent DOM.`);
+    }
+    await this.controller!.selectByBackendNodeId(backendNodeId, optionValue);
+    return { success: true, action: 'click', agentId };
+  }
+
   async extract(type: 'text' | 'links' | 'all'): Promise<ExtractResult> {
     this.ensureLaunched();
     if (type === 'all') {

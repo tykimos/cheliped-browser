@@ -19,6 +19,8 @@ export interface ChelipedOptions {
   compression?: CompressionOptions;
   waitStrategy?: 'load' | 'networkIdle';
   downloadPath?: string;
+  // Phase 3: Stealth / Anti-detection
+  stealth?: boolean; // Enable all anti-detection measures (default: true)
   session?: {
     profileName?: string;
     profileDir?: string;
