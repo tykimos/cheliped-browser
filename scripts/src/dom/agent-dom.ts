@@ -90,16 +90,32 @@ export class AgentDomBuilder {
     return this.idMap.get(agentId);
   }
 
-  async extractAgentDom(transport: CDPTransport, compression?: CompressionOptions): Promise<AgentDom> {
-    const rawTree = await this.extractor.extractDomTree(transport);
+  async extractAgentDom(
+    transport: CDPTransport,
+    compression?: CompressionOptions,
+    maxDepth?: number,
+  ): Promise<AgentDom & { _timing?: Record<string, number> }> {
+    const timing: Record<string, number> = {};
+    let t0 = Date.now();
+
+    const rawTree = await this.extractor.extractDomTree(transport, maxDepth);
+    timing.extract = Date.now() - t0;
+
+    t0 = Date.now();
     const filtered = this.domFilter.filter(rawTree);
+    timing.filter = Date.now() - t0;
+
+    t0 = Date.now();
     let elements = this.semanticExtractor.extract(filtered);
+    timing.semantic = Date.now() - t0;
 
     // Token compression (Phase 2)
+    t0 = Date.now();
     if (compression && compression.enabled !== false) {
       const compressor = new TokenCompressor(compression);
       elements = compressor.compress(elements);
     }
+    timing.compress = Date.now() - t0;
 
     const [titleResult, urlResult] = await Promise.all([
       transport.send('Runtime.evaluate', {
@@ -117,6 +133,9 @@ export class AgentDomBuilder {
     const urlValue =
       (urlResult as { result?: { value?: string } })?.result?.value ?? '';
 
-    return this.build(elements, urlValue, titleValue);
+    timing.total = Object.values(timing).reduce((a, b) => a + b, 0);
+
+    const result = this.build(elements, urlValue, titleValue);
+    return { ...result, _timing: timing };
   }
 }

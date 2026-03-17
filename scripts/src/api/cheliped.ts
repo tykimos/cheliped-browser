@@ -200,17 +200,55 @@ export class Cheliped {
 
   async extract(type: 'text' | 'links' | 'all'): Promise<ExtractResult> {
     this.ensureLaunched();
-    if (type === 'all') {
-      const agentDom = await this.observe();
-      return { type, data: agentDom };
-    } else if (type === 'text') {
-      const agentDom = await this.observe();
-      return { type, data: agentDom.texts };
-    } else if (type === 'links') {
-      const agentDom = await this.observe();
-      return { type, data: agentDom.links };
+    const transport = this.connection!.getTransport();
+
+    // Fast path: use lightweight JS extraction for text/links instead of full DOM pipeline
+    if (type === 'text') {
+      const result = await transport.send('Runtime.evaluate', {
+        expression: `(function() {
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          const texts = [];
+          let node;
+          while (node = walker.nextNode()) {
+            const t = node.textContent.trim();
+            if (t && t.length > 1) {
+              const style = window.getComputedStyle(node.parentElement);
+              if (style.display !== 'none' && style.visibility !== 'hidden') {
+                texts.push({ text: t.slice(0, 300) });
+              }
+            }
+          }
+          return texts.slice(0, 2000);
+        })()`,
+        returnByValue: true,
+      });
+      const data = (result as { result?: { value?: unknown } })?.result?.value ?? [];
+      return { type, data };
     }
-    return { type, data: null };
+
+    if (type === 'links') {
+      const result = await transport.send('Runtime.evaluate', {
+        expression: `(function() {
+          const links = Array.from(document.querySelectorAll('a[href]'));
+          const seen = new Set();
+          return links.reduce(function(acc, a) {
+            const href = a.href;
+            if (!href || seen.has(href)) return acc;
+            seen.add(href);
+            const text = (a.textContent || '').trim().slice(0, 200);
+            if (text) acc.push({ text: text, href: href });
+            return acc;
+          }, []).slice(0, 5000);
+        })()`,
+        returnByValue: true,
+      });
+      const data = (result as { result?: { value?: unknown } })?.result?.value ?? [];
+      return { type, data };
+    }
+
+    // type === 'all': full pipeline
+    const agentDom = await this.observe();
+    return { type, data: agentDom };
   }
 
   async screenshot(): Promise<ScreenshotResult> {

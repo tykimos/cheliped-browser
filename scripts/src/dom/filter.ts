@@ -1,6 +1,10 @@
 import type { InternalDomNode } from '../types/internal-dom.types.js';
 
-const REMOVED_TAGS = new Set(['script', 'style', 'noscript', 'meta']);
+const REMOVED_TAGS = new Set([
+  'script', 'style', 'noscript', 'meta',
+  'template', 'iframe',    // iframe content handled separately by extractor
+  'path', 'polygon', 'rect', 'circle', 'line', 'ellipse', 'polyline', // SVG internals
+]);
 
 function hasMeaningfulAttributes(node: InternalDomNode): boolean {
   const attrs = node.attributes;

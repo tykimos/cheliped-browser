@@ -9,9 +9,9 @@ interface FrameInfo {
 }
 
 export class DomExtractor {
-  async extractDomTree(transport: CDPTransport): Promise<InternalDomNode> {
+  async extractDomTree(transport: CDPTransport, maxDepth?: number): Promise<InternalDomNode> {
     const response = (await transport.send('DOM.getDocument', {
-      depth: -1,
+      depth: maxDepth ?? -1,
       pierce: true,
     })) as { root: Protocol.DOM.Node };
 
