@@ -25,6 +25,113 @@ Cheliped is a **browser automation skill** for AI agents. It controls Chrome via
 
 ---
 
+## 🤖 Why Claude Code & OpenClaw?
+
+Cheliped is not a general-purpose browser automation library. It is a **skill** — purpose-built for AI agent platforms that need to browse the web as part of larger tasks. Here's why the design fits Claude Code and OpenClaw specifically:
+
+### The Problem: LLMs Can't See Web Pages
+
+When an AI agent needs to "check a website" or "fill out a form", it faces a fundamental challenge: web pages are visual, but LLMs process text. Existing solutions have trade-offs:
+
+| Approach | Problem for AI Agents |
+|:---------|:---------------------|
+| **Raw HTML** | 30,000–130,000 tokens per page. Blows up context windows, costs spike, reasoning quality drops. |
+| **Screenshots** | Vision models can read them, but can't interact. "Click the blue button" requires knowing coordinates. |
+| **Playwright / Puppeteer** | Designed for human developers writing test scripts — not for LLMs making autonomous decisions. Requires CSS selectors the LLM must construct. |
+| **Accessibility trees** | Flat, verbose, no interaction IDs. The LLM must parse tree structure to understand the page. |
+
+### The Solution: Agent DOM
+
+Cheliped solves this with **Agent DOM** — a representation designed specifically for how LLMs reason:
+
+```json
+{
+  "buttons": [{"id": 3, "text": "Submit"}, {"id": 4, "text": "Cancel"}],
+  "inputs":  [{"id": 5, "placeholder": "Email", "type": "email"}],
+  "links":   [{"id": 6, "text": "Forgot password?", "href": "/reset"}],
+  "texts":   ["Welcome back! Please sign in to continue."]
+}
+```
+
+The LLM instantly knows: there are 2 buttons, 1 input field, 1 link, and context text. To fill the email field, it says `fill 5 "user@example.com"`. To submit, it says `click 3`. No CSS selectors, no XPath, no coordinate calculation.
+
+### How It Integrates with Claude Code
+
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) discovers skills automatically via `SKILL.md`. When a user asks Claude to "check a website" or "fill out a form", Claude Code:
+
+1. **Detects the trigger** — SKILL.md's description matches browsing-related intents
+2. **Reads the skill** — learns the `observe → act → observe` workflow and available commands
+3. **Executes via CLI** — runs `node scripts/cheliped-cli.mjs '[...]'` with JSON commands
+4. **Parses JSON output** — Agent DOM comes back as structured JSON to stdout, directly consumable
+
+```
+User: "Check the top 3 stories on Hacker News"
+    │
+    ▼
+Claude Code: detects browsing intent → loads cheliped-browser skill
+    │
+    ▼
+Shell: node cheliped-cli.mjs '[{"cmd":"goto","args":["https://news.ycombinator.com"]},{"cmd":"observe"}]'
+    │
+    ▼
+Agent DOM (JSON): {"links": [{"id":1, "text":"Story 1", "href":"..."}, ...], "texts": [...]}
+    │
+    ▼
+Claude Code: parses Agent DOM → responds "The top 3 stories are: 1. ... 2. ... 3. ..."
+```
+
+Key design choices for Claude Code compatibility:
+- **All output is JSON to stdout** — no interactive prompts, no TUI, no color codes. Pure machine-readable output.
+- **Stateless CLI calls** — each invocation is a standalone command. Claude Code doesn't maintain process state between tool calls.
+- **Session persistence via Chrome** — Chrome stays alive between CLI calls. Claude Code can `goto` in one turn, `observe` in the next, `click` in the third — all on the same browser session.
+- **Error format** — failures return `{"error": "message"}` so Claude can reason about what went wrong.
+
+### How It Integrates with OpenClaw
+
+[OpenClaw](https://openclaw.org) uses the same skill discovery pattern. When installed at `~/.openclaw/skills/cheliped-browser/`, OpenClaw agents can:
+
+1. **Auto-discover** — OpenClaw scans the skills directory and reads SKILL.md metadata
+2. **Invoke the browser tool** — agents call cheliped commands through the `browser` tool interface
+3. **Multi-agent browsing** — `--session` flag lets different OpenClaw agents browse independently with isolated Chrome instances
+
+```
+OpenClaw Agent: "어시, 해커뉴스 톱 3 뉴스 알려줘"
+    │
+    ▼
+OpenClaw: skill match → cheliped-browser → browser tool
+    │
+    ▼
+Cheliped: goto → observe → Agent DOM
+    │
+    ▼
+Agent: "현재 Hacker News 톱 3 뉴스: 1. ... 2. ... 3. ..."
+```
+
+### Why Not Just Use Playwright/Puppeteer Directly?
+
+AI agent platforms *could* give LLMs direct access to Playwright or Puppeteer. But:
+
+| | Cheliped (Skill) | Playwright/Puppeteer (Direct) |
+|:--|:-----------------|:-----------------------------|
+| **LLM must know** | 10 simple commands (`goto`, `observe`, `click`, `fill`, ...) | Hundreds of API methods, CSS selector syntax, async patterns |
+| **Interaction** | `click 3` (numeric ID) | `page.click('button.submit-form:nth-child(2)')` (fragile selector) |
+| **Token cost** | ~2,864 tokens avg | ~5,000–12,000 tokens avg |
+| **Context needed** | SKILL.md (~80 lines) | Full API docs (thousands of lines) |
+| **Error recovery** | Simple JSON errors | Stack traces, timeout errors, selector not found |
+| **Install** | `npm install` (ws only) | Full browser framework + browser binary |
+
+Cheliped abstracts away browser complexity so the LLM can focus on **what to do**, not **how to do it**.
+
+### Design Principles
+
+1. **Token-first** — Every design decision optimizes for fewer tokens. LLM API costs scale with token count; fewer tokens = cheaper and faster agent runs.
+2. **Observe-Act loop** — Matches reinforcement learning patterns that LLMs handle naturally. Observe state → reason → act → observe new state.
+3. **Numeric IDs over selectors** — LLMs are better at referencing `id: 3` than constructing `div.container > form > button:first-child`. Selectors break on DOM changes; numeric IDs are always valid after the latest `observe`.
+4. **JSON in, JSON out** — No parsing ambiguity. The LLM sends JSON commands and receives JSON results. No regex needed, no text scraping.
+5. **Zero-config for agents** — First call auto-launches Chrome. No setup step needed in the agent's workflow. Just `goto` and go.
+
+---
+
 ## ⚖️ How Does It Compare?
 
 > Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2025-03-18 · v1.0.0
@@ -73,18 +180,35 @@ Tested on 10 edge-case sites (NPM, Reddit, YouTube, Twitter/X, Google, Stack Ove
 
 ### As a Claude Code Skill
 
+Claude Code discovers skills from `~/.claude/skills/`. Once installed, Claude automatically uses Cheliped whenever it detects browsing-related tasks ("check this website", "fill out this form", "scrape this page").
+
 ```bash
 git clone https://github.com/tykimos/cheliped-browser.git ~/.claude/skills/cheliped-browser
 cd ~/.claude/skills/cheliped-browser/scripts && npm install && npm run build
 ```
 
-That's it. Claude Code will automatically use this skill when browsing tasks are detected.
+No configuration needed. Claude Code reads `SKILL.md`, learns the commands, and starts using them autonomously.
 
 ### As an OpenClaw Skill
+
+OpenClaw discovers skills from `~/.openclaw/skills/`. The agent can invoke Cheliped through OpenClaw's `browser` tool interface, with the same observe-act workflow.
 
 ```bash
 git clone https://github.com/tykimos/cheliped-browser.git ~/.openclaw/skills/cheliped-browser
 cd ~/.openclaw/skills/cheliped-browser/scripts && npm install && npm run build
+
+# Also symlink to workspace for full compatibility
+ln -s ~/.openclaw/skills/cheliped-browser ~/.openclaw/workspace/skills/cheliped-browser
+```
+
+### Standalone (No AI Agent)
+
+Cheliped can also be used directly from the command line for scripting or testing:
+
+```bash
+git clone https://github.com/tykimos/cheliped-browser.git && cd cheliped-browser
+cd scripts && npm install && npm run build
+node cheliped-cli.mjs '[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]'
 ```
 
 ---
