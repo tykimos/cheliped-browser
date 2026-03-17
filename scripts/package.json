@@ -13,7 +13,12 @@
       "require": "./dist/index.cjs"
     }
   },
-  "files": ["dist", "scripts", "SKILL.md", "LICENSE.txt"],
+  "files": [
+    "dist",
+    "scripts",
+    "SKILL.md",
+    "LICENSE.txt"
+  ],
   "bin": {
     "cheliped": "./scripts/cheliped-cli.mjs"
   },
@@ -26,16 +31,18 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
-    "ws": "^8.16.0",
-    "devtools-protocol": "^0.0.1596832"
+    "devtools-protocol": "^0.0.1596832",
+    "playwright": "^1.58.2",
+    "puppeteer": "^22.15.0",
+    "ws": "^8.16.0"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "tsup": "^8.0.0",
-    "vitest": "^1.6.0",
-    "@types/ws": "^8.5.10",
     "@types/node": "^20.11.0",
-    "tsx": "^4.7.0"
+    "@types/ws": "^8.5.10",
+    "tsup": "^8.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
   },
   "engines": {
     "node": ">=20"

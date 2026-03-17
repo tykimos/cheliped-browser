@@ -502,6 +502,8 @@ const TARGETS = [
   { name: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Web_browser' },
   { name: 'GitHub', url: 'https://github.com/trending' },
   { name: 'Example.com', url: 'https://example.com' },
+  { name: 'React (TodoMVC)', url: 'https://todomvc.com/examples/react/dist/' },
+  { name: 'MDN Web Docs', url: 'https://developer.mozilla.org/en-US/docs/Web/HTML' },
 ];
 
 async function main() {
@@ -674,7 +676,7 @@ async function main() {
   console.log('📈 OVERALL QUALITY SCORE');
   console.log('═'.repeat(72));
   console.log('');
-  console.log('Weighted: Text Recall 30% + Link Recall 25% + Link Precision 15% + Button 15% + Input 15%');
+  console.log('Weighted: Text 25% + Link Recall 20% + Link Precision 10% + Button 15% + Input 15% + Heading 15%');
   console.log('');
   console.log(`| Metric | ${toolNames} |`);
   console.log(`|--------|${'----------|'.repeat(tools.length)}`);
@@ -688,9 +690,10 @@ async function main() {
     const avgLinkRecall = lrs.length > 0 ? lrs.reduce((s, v) => s + v.recall, 0) / lrs.length : 0;
     const avgLinkPrecision = lrs.length > 0 ? lrs.reduce((s, v) => s + v.precision, 0) / lrs.length : 0;
 
-    // Button & Input recall averages
+    // Button, Input, Heading recall averages
     let btnRecalls = [];
     let inpRecalls = [];
+    let hdgRecalls = [];
     for (const gt of groundTruths) {
       const out = tool.outputs.find(o => o.name === gt.name);
       if (out?.success && gt.truth) {
@@ -698,12 +701,16 @@ async function main() {
         btnRecalls.push(br.recall);
         const ir = computeInputRecall(gt.truth, out);
         inpRecalls.push(ir.recall);
+        const hr = computeHeadingRecall(gt.truth, out);
+        hdgRecalls.push(hr.recall);
       }
     }
     const avgBtnRecall = btnRecalls.length > 0 ? btnRecalls.reduce((s, v) => s + v, 0) / btnRecalls.length : 0;
     const avgInpRecall = inpRecalls.length > 0 ? inpRecalls.reduce((s, v) => s + v, 0) / inpRecalls.length : 0;
+    const avgHdgRecall = hdgRecalls.length > 0 ? hdgRecalls.reduce((s, v) => s + v, 0) / hdgRecalls.length : 0;
 
-    const overall = avgTextRecall * 0.3 + avgLinkRecall * 0.25 + avgLinkPrecision * 0.15 + avgBtnRecall * 0.15 + avgInpRecall * 0.15;
+    const overall = avgTextRecall * 0.25 + avgLinkRecall * 0.20 + avgLinkPrecision * 0.10
+      + avgBtnRecall * 0.15 + avgInpRecall * 0.15 + avgHdgRecall * 0.15;
 
     overallScores[tool.name] = {
       textRecall: avgTextRecall,
@@ -711,6 +718,7 @@ async function main() {
       linkPrecision: avgLinkPrecision,
       btnRecall: avgBtnRecall,
       inpRecall: avgInpRecall,
+      hdgRecall: avgHdgRecall,
       overall,
     };
   }
@@ -722,6 +730,7 @@ async function main() {
     ['Link Precision', t => pct(overallScores[t]?.linkPrecision || 0)],
     ['Button Recall', t => pct(overallScores[t]?.btnRecall || 0)],
     ['Input Recall', t => pct(overallScores[t]?.inpRecall || 0)],
+    ['Heading Recall', t => pct(overallScores[t]?.hdgRecall || 0)],
     ['**Overall Score**', t => `**${pct(overallScores[t]?.overall || 0)}**`],
   ];
 

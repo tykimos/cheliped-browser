@@ -48,6 +48,7 @@ export class BrowserController {
 
     // 5. Dispatch mouse events
     await this._dispatchClick(x, y);
+    await this.page.waitForStable();
   }
 
   async clickByBackendNodeId(backendNodeId: number): Promise<void> {
@@ -75,20 +76,19 @@ export class BrowserController {
       // 4. Dispatch mouse events
       await this._dispatchClick(x, y);
     } catch {
-      // Fallback: scroll element into view and click via JS
-      await this.transport.send('Runtime.evaluate', {
-        expression: `
-          (function() {
-            const node = document.querySelector('[data-backend-node-id="${backendNodeId}"]');
-            if (node) {
-              node.scrollIntoView();
-              node.click();
-            }
-          })()
-        `,
+      // Fallback: resolve node via CDP and call .click() on the RemoteObject
+      const resolveResult = await this.transport.send('DOM.resolveNode', {
+        backendNodeId,
+      }) as Record<string, unknown>;
+      const remoteObject = resolveResult.object as Record<string, unknown>;
+      const objectId = remoteObject.objectId as string;
+      await this.transport.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() { this.scrollIntoView(); this.click(); }`,
         returnByValue: true,
       });
     }
+    await this.page.waitForStable();
   }
 
   private async _dispatchClick(x: number, y: number): Promise<void> {

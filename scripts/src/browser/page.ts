@@ -100,6 +100,10 @@ export class Page {
     });
   }
 
+  async waitForStable(timeoutMs: number = 2000): Promise<void> {
+    return this.waitForNetworkIdle(500, timeoutMs);
+  }
+
   async waitForLoad(): Promise<void> {
     return new Promise((resolve) => {
       const onLoad = () => {

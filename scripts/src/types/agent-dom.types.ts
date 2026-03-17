@@ -11,6 +11,7 @@ export interface AgentDomNode {
   name?: string;
   value?: string;
   type?: string;
+  tag?: string;
   attributes?: Record<string, string>;
 }
 

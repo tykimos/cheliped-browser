@@ -52,6 +52,7 @@ export class AgentDomBuilder {
         ...(el.name && { name: el.name }),
         ...(el.value && { value: el.value }),
         ...(el.type && { type: el.type }),
+        ...(el.tag && { tag: el.tag }),
       };
 
       switch (el.category) {

@@ -29,6 +29,8 @@ const TARGETS = [
   { name: 'Wikipedia', url: 'https://en.wikipedia.org/wiki/Web_browser' },
   { name: 'GitHub', url: 'https://github.com/trending' },
   { name: 'Example.com', url: 'https://example.com' },
+  { name: 'React (TodoMVC)', url: 'https://todomvc.com/examples/react/dist/' },
+  { name: 'MDN Web Docs', url: 'https://developer.mozilla.org/en-US/docs/Web/HTML' },
 ];
 
 // ─── Cheliped ───────────────────────────────────────────────────

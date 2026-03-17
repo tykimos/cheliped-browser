@@ -111,6 +111,7 @@ export class SemanticExtractor {
     if (attributes['name']) el.name = attributes['name'];
     if (attributes['value']) el.value = attributes['value'];
     if (attributes['type']) el.type = attributes['type'];
+    if (/^h[1-6]$/.test(tagName)) el.tag = tagName;
     if (role) el.role = role;
     if (Object.keys(attributes).length > 0) el.attributes = { ...attributes };
 

@@ -26,6 +26,7 @@ export interface SemanticElement {
   name?: string;
   value?: string;
   type?: string; // input type (text, password, email, etc.)
+  tag?: string; // original HTML tag name (e.g. 'h1', 'h2', ...)
   role?: string; // ARIA role if present
   attributes?: Record<string, string>;
   formBackendNodeId?: number; // backendNodeId of parent form (for UI Graph)
