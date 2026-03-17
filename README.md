@@ -23,15 +23,43 @@ Cheliped is a **browser automation skill** for AI agents. It controls Chrome via
 
 > **Why "Cheliped"?** — A cheliped is a crab's claw. 🦀 This tool is the claw that lets your AI agent grab things from the web.
 
-### Highlights
+---
 
-- 🔍 **Agent DOM** — Compressed DOM with numeric IDs. Far fewer tokens than raw HTML.
-- 🧠 **Semantic Actions** — Auto-detects login forms, search bars, navigation from page structure.
-- ⚛️ **React/SPA Ready** — Native input value setters bypass React's synthetic events.
-- 🔄 **Session Persistence** — Chrome stays alive between calls. No restart overhead.
-- 🔀 **Concurrent Sessions** — Multiple agents browse independently with `--session`.
-- 🔒 **Built-in Security** — Domain allowlists, prompt injection detection, exfiltration guards.
-- 📦 **Zero Puppeteer/Playwright** — Direct CDP over WebSocket. Two npm dependencies.
+## ⚖️ How Does It Compare?
+
+> Benchmarked on 6 sites (static, SPA, content-heavy) · 2025-03-17
+
+| | Cheliped | agent-browser | Playwright | Puppeteer |
+|:--|:---------|:--------------|:-----------|:----------|
+| **Best for** | LLM agent browsing | CLI automation | Full browser testing | Headless scripting |
+| **Avg Tokens** | **2,206** | 11,945 | 5,656 | 5,056 |
+| **Avg Speed** | **34ms** | 259ms | 224ms | 124ms |
+| **Quality** | **88.4%** | 72.6% | 75.1% | 73.1% |
+| **Dependencies** | ws only | Rust binary | Full framework | Full framework |
+| **SPA Support** | Basic | Basic | Excellent | Good |
+| **Wait Strategy** | Network idle | Manual | Auto-wait | Manual |
+| **Production Maturity** | Early | Stable | Mature | Mature |
+
+### Strengths
+
+- **2.5–5x fewer tokens** than all competitors — directly reduces LLM API costs
+- **Fastest extraction (34ms avg)** — 3.6–7.6x faster than alternatives via direct CDP
+- **Best content recognition (88.4%)** — highest recall on links, buttons, inputs, headings
+- **Agent DOM** — purpose-built for LLM agents: numbered interactive elements with semantic grouping
+- **Zero framework dependencies** — just `ws` for WebSocket, no Playwright/Puppeteer required
+- **React/SPA fill** — native input value setters bypass synthetic event systems
+- **Session persistence** — Chrome stays alive between agent invocations, no restart overhead
+- **Concurrent sessions** — multiple agents browse independently with `--session`
+
+### Known Limitations
+
+- **Text recall drops on list-heavy pages** — compression (`maxListItems: 30`) truncates long lists (GitHub: 37%). Trade-off between tokens and completeness.
+- **Small SPA token overhead** — on tiny pages like TodoMVC (278 tokens raw), structured output (530 tok) is larger than Puppeteer's a11y snapshot (100 tok). Overhead pays off on real-world pages.
+- **Early-stage project** — not yet battle-tested in production. Playwright and Puppeteer have years of maturity.
+- **Benchmark caveats**:
+  - Token estimation uses `chars/4`, not a real tokenizer
+  - Playwright/Puppeteer benchmarked via a11y snapshots, not their primary CSS selector APIs
+  - 6 test sites — no Shadow DOM, heavy iframe, or WebSocket-driven sites tested
 
 ---
 
@@ -342,43 +370,6 @@ Raw DOM Tree
 | Input Recall | 15% | **79.8%** | 1.2% | 33.3% | 50.0% |
 | Heading Recall | 15% | **89.1%** | 88.1% | 86.4% | 86.7% |
 | **Overall** | **100%** | **88.4%** | **72.6%** | **75.1%** | **73.1%** |
-
----
-
-## ⚖️ Honest Assessment
-
-### Strengths
-
-- **Token efficiency is real** — 2.5–5x fewer tokens than competitors on average, directly reducing LLM API costs.
-- **Fastest DOM extraction** — 34ms average, 3.6–7.6x faster than alternatives.
-- **Best content recognition** — 88.4% overall quality score across 6 diverse sites.
-- **Agent DOM is purpose-built** — Numbered interactive elements with semantic grouping (buttons, links, inputs, forms) are directly actionable by LLM agents.
-- **Zero framework dependencies** — Just `ws` for WebSocket. No Playwright/Puppeteer required.
-- **React/SPA fill support** — Native input value setters bypass synthetic event systems.
-- **Session persistence** — Browser survives between agent invocations.
-
-### Known Limitations
-
-- **GitHub text recall is low (37%)** — Aggressive compression (`maxListItems: 30`) still truncates long lists. Trade-off: more tokens vs more content.
-- **React SPA token inflation** — On very small SPAs like TodoMVC, Cheliped's structured output (530 tok) is larger than Puppeteer's a11y snapshot (100 tok). The overhead pays off on larger pages.
-- **No auto-wait for SPA updates** — After `click()`, the agent must manually call `observe()` again. No built-in `waitForSelector` or `waitForNavigation` like Playwright.
-- **Benchmark methodology caveats**:
-  - Token estimation uses `chars/4`, not a real tokenizer — favors compact JSON slightly.
-  - Playwright/Puppeteer are benchmarked via a11y snapshots, not their primary CSS selector APIs.
-  - 6 test sites may not represent all web patterns (no Shadow DOM, heavy iframe, or WebSocket-driven sites tested).
-
-### Comparison Summary
-
-| | Cheliped | agent-browser | Playwright | Puppeteer |
-|:--|:---------|:--------------|:-----------|:----------|
-| **Best for** | LLM agent browsing | CLI automation | Full browser testing | Headless scripting |
-| **Avg Tokens** | **2,206** | 11,945 | 5,656 | 5,056 |
-| **Avg Speed** | **34ms** | 259ms | 224ms | 124ms |
-| **Quality** | **88.4%** | 72.6% | 75.1% | 73.1% |
-| **Dependencies** | ws only | Rust binary | Full framework | Full framework |
-| **SPA Support** | Basic | Basic | Excellent | Good |
-| **Wait Strategy** | Manual | Manual | Auto-wait | Manual |
-| **Production Maturity** | Early | Stable | Mature | Mature |
 
 <details>
 <summary>🔧 Run the benchmarks yourself</summary>
