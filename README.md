@@ -136,17 +136,78 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 
 > Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2025-03-18 · v1.0.0
 
-| | Cheliped | agent-browser | Playwright | Puppeteer |
-|:--|:---------|:--------------|:-----------|:----------|
-| **Best for** | LLM agent browsing | CLI automation | Full browser testing | Headless scripting |
-| **Avg Tokens** | **3,512** | 11,950 | 5,706 | 5,051 |
-| **Avg Speed** | **40ms** | 200ms | 66ms | 82ms |
-| **Quality** | **88.9%** | 72.9% | 75.6% | 73.7% |
-| **Dependencies** | ws only | Rust binary | Full framework | Full framework |
-| **iframe/Shadow DOM** | Same-origin only | No | Partial | Partial |
-| **SPA Support** | Basic | Basic | Excellent | Good |
-| **Wait Strategy** | Network idle | Manual | Auto-wait | Manual |
-| **Production Maturity** | Early | Stable | Mature | Mature |
+| | Cheliped | OpenClaw Browser | agent-browser | Playwright | Puppeteer |
+|:--|:---------|:-----------------|:--------------|:-----------|:----------|
+| **Best for** | LLM agent browsing | Full-featured agent platform | CLI automation | Full browser testing | Headless scripting |
+| **Avg Tokens** | **8,310** | 16,762 (4,251 efficient) | 11,950 | 5,706 | 5,051 |
+| **Avg Speed** | **79ms** | 1,280ms | 200ms | 66ms | 82ms |
+| **Quality** | **88.9%** | — | 72.9% | 75.6% | 73.7% |
+| **Output Format** | Structured JSON (categorized arrays) | YAML accessibility tree | Raw text | Flat a11y tree | Flat a11y tree |
+| **Element IDs** | Numeric `agentId` | Symbolic `[ref=eN]` | None | CSS selectors | CSS selectors |
+| **Dependencies** | ws only | playwright-core | Rust binary | Full framework | Full framework |
+| **iframe/Shadow DOM** | Same-origin only | Full (via Playwright) | No | Partial | Partial |
+| **SPA Support** | Basic | Excellent | Basic | Excellent | Good |
+| **Wait Strategy** | Network idle | Auto-wait (Playwright) | Manual | Auto-wait | Manual |
+| **Production Maturity** | Early | Production | Stable | Mature | Mature |
+
+### Cheliped vs OpenClaw Browser — Detailed Comparison
+
+Cheliped and OpenClaw Browser both solve the same problem — giving AI agents eyes on the web — but with fundamentally different approaches.
+
+#### Architecture
+
+| | Cheliped | OpenClaw Browser |
+|:--|:---------|:-----------------|
+| **Protocol** | Direct CDP WebSocket (raw) | Playwright over CDP |
+| **Browser launch** | Self-managed headless Chrome | Attached to running Chrome instance |
+| **API style** | CLI JSON commands / JS library | HTTP REST API via gateway |
+| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | Playwright `ariaSnapshot()` / `_snapshotForAI()` |
+
+#### Output Format Comparison
+
+**Cheliped (Agent DOM)** — Structured JSON with categorized arrays:
+```json
+{
+  "texts": [{"agentId": 1, "tag": "h1", "text": "Example Domain"}],
+  "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
+  "buttons": [], "inputs": []
+}
+```
+
+**OpenClaw (AI Snapshot)** — YAML-like accessibility tree with ref tokens:
+```yaml
+- heading "Example Domain" [level=1] [ref=e3]
+- paragraph: This domain is for use in documentation examples...
+- link "Learn more" [ref=e6] [cursor=pointer]:
+  - /url: https://iana.org/domains/example
+```
+
+#### Token Output & Speed
+
+![Cheliped vs OpenClaw: Tokens](docs/images/benchmark-openclaw-tokens.png)
+
+| Site | Cheliped | OpenClaw (full) | OpenClaw (efficient) | Cheliped Speed | OpenClaw Speed |
+|:-----|--------:|----------------:|--------------------:|--------------:|--------------:|
+| Hacker News | **7,812** | 26,396 | **264** | **13ms** | 1,812ms |
+| Wikipedia | **23,104** | 31,656 | 12,177 | **60ms** | 1,219ms |
+| GitHub | **6,698** | 8,424 | 2,465 | **21ms** | 1,153ms |
+| Example.com | 146 | 188 | **85** | **1ms** | 1,033ms |
+| MDN Web Docs | **7,639** | 9,394 | 2,688 | **9ms** | 1,187ms |
+| BBC | **4,458** | 24,511 | 7,828 | 370ms | 1,278ms |
+| **Average** | **8,310** | **16,762** | **4,251** | **79ms** | **1,280ms** |
+
+![Cheliped vs OpenClaw: Speed](docs/images/benchmark-openclaw-speed.png)
+
+#### When to Use Which
+
+| Scenario | Recommended | Why |
+|:---------|:-----------|:----|
+| **Quick page scan** | Cheliped | 16x faster extraction, 2x fewer tokens |
+| **Complex SPA interaction** | OpenClaw | Full Playwright auto-wait, better SPA support |
+| **Token-critical workloads** | OpenClaw efficient | 4,251 avg tokens (interactive-only mode) |
+| **Structured data extraction** | Cheliped | Categorized arrays (texts/links/buttons/inputs) are immediately parseable |
+| **Full-featured agent platform** | OpenClaw | Tabs, downloads, file uploads, dialog handling, trace recording |
+| **Lightweight skill integration** | Cheliped | Zero framework deps (ws only), self-contained CLI |
 
 ### Performance at a Glance
 
