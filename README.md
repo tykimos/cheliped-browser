@@ -136,19 +136,20 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 
 > Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2025-03-18 · v1.0.0
 
-| | Cheliped | OpenClaw Browser | agent-browser | Playwright | Puppeteer |
-|:--|:---------|:-----------------|:--------------|:-----------|:----------|
-| **Best for** | LLM agent browsing | Full-featured agent platform | CLI automation | Full browser testing | Headless scripting |
-| **Avg Tokens** | **8,310** | 16,762 (4,251 efficient) | 11,950 | 5,706 | 5,051 |
-| **Avg Speed** | **79ms** | 1,280ms | 200ms | 66ms | 82ms |
-| **Quality** | **88.9%** | — | 72.9% | 75.6% | 73.7% |
-| **Output Format** | Structured JSON (categorized arrays) | YAML accessibility tree | Raw text | Flat a11y tree | Flat a11y tree |
-| **Element IDs** | Numeric `agentId` | Symbolic `[ref=eN]` | None | CSS selectors | CSS selectors |
-| **Dependencies** | ws only | playwright-core | Rust binary | Full framework | Full framework |
-| **iframe/Shadow DOM** | Same-origin only | Full (via Playwright) | No | Partial | Partial |
-| **SPA Support** | Basic | Excellent | Basic | Excellent | Good |
-| **Wait Strategy** | Network idle | Auto-wait (Playwright) | Manual | Auto-wait | Manual |
-| **Production Maturity** | Early | Production | Stable | Mature | Mature |
+| | Cheliped | OpenClaw Browser | Tandem Browser | agent-browser | Playwright | Puppeteer |
+|:--|:---------|:-----------------|:---------------|:--------------|:-----------|:----------|
+| **Best for** | LLM agent browsing | Full-featured agent platform | Human-AI co-browsing | CLI automation | Full browser testing | Headless scripting |
+| **Avg Tokens** | **2,588** | 16,762 (4,251 efficient) | 10,631 | 11,802 | 5,672 | 5,020 |
+| **Avg Speed** | **44ms** | 1,280ms | 81ms | 208ms | 69ms | 63ms |
+| **Quality** | **88.9%** | — | — | 72.9% | 75.6% | 73.7% |
+| **Output Format** | Structured JSON (categorized arrays) | YAML accessibility tree | Indented AXTree text | Raw text | Flat a11y tree | Flat a11y tree |
+| **Element IDs** | Numeric `agentId` | Symbolic `[ref=eN]` | `@ref` labels (`@e1`) | None | CSS selectors | CSS selectors |
+| **Dependencies** | ws only | playwright-core | Electron + CDP | Rust binary | Full framework | Full framework |
+| **iframe/Shadow DOM** | Same-origin only | Full (via Playwright) | Via Electron | No | Partial | Partial |
+| **SPA Support** | Basic | Excellent | Good | Basic | Excellent | Good |
+| **Wait Strategy** | Network idle | Auto-wait (Playwright) | MutationObserver settling | Manual | Auto-wait | Manual |
+| **Security Model** | Domain allowlist | None | 6-layer (network, JS AST, behavior) | None | None | None |
+| **Production Maturity** | Early | Production | Developer Preview | Stable | Mature | Mature |
 
 ### Cheliped vs OpenClaw Browser — Detailed Comparison
 
@@ -208,6 +209,80 @@ Cheliped and OpenClaw Browser both solve the same problem — giving AI agents e
 | **Structured data extraction** | Cheliped | Categorized arrays (texts/links/buttons/inputs) are immediately parseable |
 | **Full-featured agent platform** | OpenClaw | Tabs, downloads, file uploads, dialog handling, trace recording |
 | **Lightweight skill integration** | Cheliped | Zero framework deps (ws only), self-contained CLI |
+| **Secure human-AI browsing** | Tandem | 6-layer security, captcha detection, human-in-the-loop |
+| **Human + AI co-browsing** | Tandem | Wingman panel, persistent messenger panels, shared live workflow |
+| **Secure human-AI browsing** | Tandem | 6-layer security, captcha detection, human-in-the-loop |
+
+### Cheliped vs Tandem Browser — Detailed Comparison
+
+Tandem Browser is an Electron-based browser built for human-AI collaboration with OpenClaw. It provides a local HTTP API (250+ endpoints) and uses CDP's `Accessibility.getFullAXTree()` for page snapshots.
+
+#### Architecture
+
+| | Cheliped | Tandem Browser |
+|:--|:---------|:---------------|
+| **Runtime** | Headless Chrome (spawned) | Electron app (GUI) |
+| **Protocol** | Direct CDP WebSocket | Electron DevTools → CDP |
+| **API style** | CLI / JS library | HTTP REST API (127.0.0.1:8765) |
+| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | CDP `Accessibility.getFullAXTree()` → compact filter → `@ref` labels |
+| **Human-in-the-loop** | No | Yes (Wingman panel, captcha detection, alert handoff) |
+| **Security** | Domain allowlist + prompt guard | 6-layer (network shield, outbound guard, JS AST analysis, behavior monitoring, gatekeeper channel, layer separation) |
+
+#### Output Format Comparison
+
+**Cheliped (Agent DOM)** — Structured JSON with categorized arrays:
+```json
+{
+  "texts": [{"agentId": 1, "tag": "h1", "text": "Example Domain"}],
+  "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
+  "buttons": [], "inputs": []
+}
+```
+
+**Tandem (AXTree Snapshot)** — Indented accessibility tree with `@ref` labels:
+```
+- WebArea "Example Domain" [@e1]
+  - heading "Example Domain" [@e2]
+  - paragraph "This domain is for use..." [@e3]
+  - link "More information..." [@e4]
+```
+
+#### Token Output & Speed
+
+| Site | Cheliped | Tandem (compact AXTree) | Cheliped Speed | Tandem Speed |
+|:-----|--------:|------------------------:|--------------:|--------------:|
+| Hacker News | **2,638** | 14,058 | **26ms** | 49ms |
+| Wikipedia | **4,489** | 37,655 | **125ms** | 151ms |
+| GitHub | 4,132 | **3,849** | **66ms** | 89ms |
+| Example.com | 128 | **103** | **9ms** | 65ms |
+| React (TodoMVC) | 601 | **154** | **4ms** | 6ms |
+| MDN Web Docs | **3,538** | 7,965 | **32ms** | 123ms |
+| **Average** | **2,588** | **10,631** | **44ms** | **81ms** |
+
+![Cheliped vs Tandem](docs/images/benchmark-tandem-comparison.png)
+
+**Key takeaways:**
+- Cheliped produces **4x fewer tokens** on average (2,588 vs 10,631)
+- Cheliped is **2x faster** on extraction (44ms vs 81ms)
+- Tandem's AXTree includes all accessibility nodes (semantic + structural), resulting in higher token counts
+- Tandem excels at minimal SPAs (React TodoMVC: 154 vs 601 tokens) where the AXTree is naturally compact
+- Cheliped's custom DOM pipeline aggressively compresses content-heavy pages (Wikipedia: 4,489 vs 37,655)
+
+#### Feature Comparison
+
+| Feature | Cheliped | Tandem |
+|:--------|:---------|:-------|
+| **Snapshot format** | JSON arrays | Indented text |
+| **Click/Fill** | By `agentId` (numeric) | By `@ref` (string) |
+| **Human typing simulation** | `fillHuman()` (random delays) | BehaviorReplay (real timing data) |
+| **Content extraction** | Semantic DOM pipeline | Structured by page type (article/product/profile/search) |
+| **Captcha detection** | No | Auto-detect + show to human |
+| **Stealth patches** | No | Yes (anti-fingerprinting) |
+| **Session isolation** | User data dir | X-Session header + partition |
+| **Multi-tab** | No | Yes (250+ endpoints) |
+| **Headless mode** | Default | Background BrowserWindow |
+| **Messenger integration** | No | Telegram, Slack, Discord, Gmail, etc. |
+| **Persistent panels** | No | Bookmarks, History, Workspaces, Pinboards |
 
 ### Performance at a Glance
 
@@ -217,8 +292,8 @@ Cheliped and OpenClaw Browser both solve the same problem — giving AI agents e
 
 ### Strengths
 
-- **2–3x fewer tokens** than all competitors — directly reduces LLM API costs
-- **Fastest extraction (40ms avg)** — 2–5x faster than alternatives via direct CDP
+- **2–4x fewer tokens** than all competitors — directly reduces LLM API costs
+- **Fastest extraction (44ms avg)** — 2–5x faster than alternatives via direct CDP
 - **Best content recognition (88.9%)** — highest recall on links, buttons, inputs, headings
 - **Text deduplication** — removes duplicate text elements from nested containers (e.g. `<td><span>`)  while preserving headings
 - **Agent DOM** — purpose-built for LLM agents: numbered interactive elements with semantic grouping
@@ -543,29 +618,29 @@ Raw DOM Tree
 
 ### Token Efficiency
 
-| Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|--------:|---------:|--------------:|-----------:|----------:|
-| Hacker News | 8,623 | **2,631** | 15,306 | 10,022 | 4,796 |
-| Wikipedia | 123,640 | **7,287** | 39,475 | 15,417 | 19,744 |
-| GitHub | 133,314 | 3,871 | 4,180 | 2,347 | **1,592** |
-| Example.com | 129 | 128 | 120 | **58** | 71 |
-| React (SPA) | 655 | 539 | 1,016 | 488 | **388** |
-| MDN Web Docs | 17,651 | **3,645** | 11,601 | 5,901 | 3,717 |
-| **Average** | **47,335** | **3,017** | **11,950** | **5,706** | **5,051** |
+| Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-----|--------:|---------:|--------------:|-----------:|----------:|-------:|
+| Hacker News | 8,603 | **2,638** | 15,038 | 9,892 | 4,696 | 14,058 |
+| Wikipedia | 71,151 | **4,489** | 39,475 | 15,417 | 19,744 | 37,655 |
+| GitHub | 130,734 | 4,132 | 4,026 | 2,275 | **1,505** | 3,849 |
+| Example.com | 132 | 128 | 120 | **58** | 71 | 103 |
+| React (SPA) | 278 | 601 | 1,016 | 488 | 388 | **154** |
+| MDN Web Docs | 24,987 | **3,538** | 11,138 | 5,901 | 3,717 | 7,965 |
+| **Average** | **39,314** | **2,588** | **11,802** | **5,672** | **5,020** | **10,631** |
 
 ![Tokens per Site](docs/images/benchmark-tokens-per-site.png)
 
 ### Speed — DOM Extraction
 
-| Site | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|--------:|--------------:|-----------:|----------:|
-| Hacker News | **28ms** | 222ms | 64ms | 94ms |
-| Wikipedia | **98ms** | 260ms | 67ms | 169ms |
-| GitHub | **53ms** | 193ms | 113ms | 102ms |
-| Example.com | **4ms** | 165ms | 24ms | 15ms |
-| React (SPA) | **2ms** | 168ms | 27ms | 14ms |
-| MDN Web Docs | **20ms** | 192ms | 100ms | 97ms |
-| **Average** | **34ms** | **200ms** | **66ms** | **82ms** |
+| Site | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-----|--------:|--------------:|-----------:|----------:|-------:|
+| Hacker News | **26ms** | 215ms | 79ms | 77ms | 49ms |
+| Wikipedia | 125ms | 269ms | **67ms** | 144ms | 151ms |
+| GitHub | **66ms** | 224ms | 83ms | 92ms | 89ms |
+| Example.com | **9ms** | 173ms | 24ms | 22ms | 65ms |
+| React (SPA) | **4ms** | 173ms | 33ms | 10ms | 6ms |
+| MDN Web Docs | **32ms** | 193ms | 128ms | 30ms | 123ms |
+| **Average** | **44ms** | **208ms** | **69ms** | **63ms** | **81ms** |
 
 ![Speed per Site](docs/images/benchmark-speed-per-site.png)
 

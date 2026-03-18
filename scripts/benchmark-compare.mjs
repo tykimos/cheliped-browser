@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// benchmark-compare.mjs — Compare Cheliped vs agent-browser vs Playwright MCP
+// benchmark-compare.mjs — Compare Cheliped vs agent-browser vs Playwright vs Puppeteer vs Tandem
 // Measures: token output size, speed, on same target sites
 
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { performance } from 'perf_hooks';
 import { execSync } from 'child_process';
+// WebSocket import not needed — Tandem uses Puppeteer's CDP session
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -264,6 +265,151 @@ async function benchPuppeteer(targets) {
   return { results, launchTime };
 }
 
+// ─── Tandem Browser (AXTree via CDP) ─────────────────────────────
+// Replicates Tandem Browser's snapshot approach:
+// Uses Accessibility.getFullAXTree() via CDP, builds tree, assigns @refs,
+// formats as indented text: "- role "name" [@ref] attrs"
+// See: tandem-browser/src/snapshot/manager.ts
+
+const TANDEM_INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'textbox', 'checkbox', 'radio',
+  'combobox', 'menuitem', 'tab', 'searchbox',
+]);
+
+function tandemBuildTree(rawNodes) {
+  if (rawNodes.length === 0) return [];
+  const nodeMap = new Map();
+  for (const raw of rawNodes) nodeMap.set(raw.nodeId, raw);
+
+  function convert(raw) {
+    const role = raw.role?.value || 'none';
+    const name = raw.name?.value || '';
+    const value = raw.value?.value || '';
+    const children = [];
+    if (raw.childIds) {
+      for (const childId of raw.childIds) {
+        const child = nodeMap.get(childId);
+        if (child) children.push(convert(child));
+      }
+    }
+    return { role, name: name || undefined, value: value || undefined, children };
+  }
+
+  return [convert(rawNodes[0])];
+}
+
+function tandemFilterCompact(nodes) {
+  const result = [];
+  for (const node of nodes) {
+    const filteredChildren = tandemFilterCompact(node.children);
+    const hasName = !!node.name;
+    const isInteractive = TANDEM_INTERACTIVE_ROLES.has(node.role);
+    const hasValue = !!node.value;
+    const hasMeaningfulChildren = filteredChildren.length > 0;
+    if (hasName || isInteractive || hasValue || hasMeaningfulChildren) {
+      result.push({ ...node, children: filteredChildren });
+    }
+  }
+  return result;
+}
+
+function tandemAssignRefs(nodes, state = { counter: 0 }) {
+  for (const node of nodes) {
+    if (node.name || TANDEM_INTERACTIVE_ROLES.has(node.role)) {
+      state.counter++;
+      node.ref = `@e${state.counter}`;
+    }
+    tandemAssignRefs(node.children, state);
+  }
+  return state.counter;
+}
+
+function tandemFormatTree(nodes, indent = 0) {
+  const lines = [];
+  const prefix = '  '.repeat(indent);
+  for (const node of nodes) {
+    let line = `${prefix}- ${node.role}`;
+    if (node.name) line += ` "${node.name}"`;
+    if (node.ref) line += ` [${node.ref}]`;
+    if (node.value) line += ` value="${node.value}"`;
+    lines.push(line);
+    if (node.children.length > 0) {
+      lines.push(tandemFormatTree(node.children, indent + 1));
+    }
+  }
+  return lines.join('\n');
+}
+
+function tandemCountNodes(nodes) {
+  let count = 0;
+  for (const node of nodes) {
+    count++;
+    count += tandemCountNodes(node.children);
+  }
+  return count;
+}
+
+async function benchTandem(targets) {
+  console.log('  🔗 Tandem Browser (AXTree via CDP)...');
+  const results = [];
+
+  // Use Puppeteer to launch Chrome and get CDP access
+  // (Tandem uses Electron+CDP, we replicate its AXTree extraction via Puppeteer's CDP session)
+  let puppeteer;
+  try {
+    puppeteer = await import('puppeteer');
+  } catch {
+    console.log('    ⚠️  Puppeteer not installed, skipping Tandem benchmark.');
+    return { results: [], launchTime: 0 };
+  }
+
+  const launchStart = performance.now();
+  const browser = await puppeteer.default.launch({ headless: 'new' });
+  const page = await browser.newPage();
+  const launchTime = performance.now() - launchStart;
+
+  // Get CDP session for AXTree access (Tandem's approach)
+  const client = await page.createCDPSession();
+
+  for (const target of targets) {
+    const r = { name: target.name, tool: 'Tandem' };
+
+    try {
+      // Navigate
+      const navStart = performance.now();
+      await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      r.navTime = performance.now() - navStart;
+
+      // Get AXTree via CDP (exactly what Tandem's SnapshotManager does)
+      const obsStart = performance.now();
+
+      await client.send('Accessibility.enable');
+      const axResult = await client.send('Accessibility.getFullAXTree');
+      const rawNodes = axResult.nodes || [];
+
+      // Build tree (Tandem's approach: buildTree → filterCompact → assignRefs → formatTree)
+      let tree = tandemBuildTree(rawNodes);
+      tree = tandemFilterCompact(tree);
+      const refCount = tandemAssignRefs(tree);
+      const text = tandemFormatTree(tree);
+
+      r.observeTime = performance.now() - obsStart;
+      r.outputChars = text.length;
+      r.outputTokens = estimateTokens(text);
+      r.elementCount = refCount;
+      r.nodeCount = tandemCountNodes(tree);
+      r.success = true;
+    } catch (e) {
+      r.success = false;
+      r.error = e.message?.substring(0, 200);
+    }
+    results.push(r);
+  }
+
+  await browser.close();
+  return { results, launchTime };
+}
+
 // ─── Raw HTML baseline ──────────────────────────────────────────
 
 async function getHtmlBaseline(targets) {
@@ -305,7 +451,7 @@ async function main() {
   console.log('🦀 Cheliped Browser — Competitive Benchmark');
   console.log('═'.repeat(72));
   console.log('');
-  console.log('Tools: Cheliped vs agent-browser vs Playwright vs Puppeteer');
+  console.log('Tools: Cheliped vs agent-browser vs Playwright vs Puppeteer vs Tandem');
   console.log(`Sites: ${TARGETS.map(t => t.name).join(', ')}`);
   console.log('');
   console.log('Running benchmarks...');
@@ -334,6 +480,14 @@ async function main() {
     puppeteerRes = { results: [], launchTime: 0 };
   }
 
+  let tandemRes;
+  try {
+    tandemRes = await benchTandem(TARGETS);
+  } catch (e) {
+    console.log(`  ⚠️  Tandem benchmark failed: ${e.message}`);
+    tandemRes = { results: [], launchTime: 0 };
+  }
+
   // ─── Output ───
 
   console.log('');
@@ -349,8 +503,8 @@ async function main() {
   console.log('');
   console.log('## Token Efficiency (output tokens for LLM consumption)');
   console.log('');
-  console.log('| Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer |');
-  console.log('|------|---------|----------|---------------|------------|-----------|');
+  console.log('| Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |');
+  console.log('|------|---------|----------|---------------|------------|-----------|--------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
@@ -359,18 +513,19 @@ async function main() {
     const ab = find(agentBr.results, name);
     const pw = find(playwrightRes.results, name);
     const pp = find(puppeteerRes.results, name);
+    const td = find(tandemRes.results, name);
 
     const tok = r => r?.success ? formatNumber(r.outputTokens) : '❌';
 
-    console.log(`| ${name} | ${html ? formatNumber(html.htmlTokens) : '—'} | ${tok(ch)} | ${tok(ab)} | ${tok(pw)} | ${tok(pp)} |`);
+    console.log(`| ${name} | ${html ? formatNumber(html.htmlTokens) : '—'} | ${tok(ch)} | ${tok(ab)} | ${tok(pw)} | ${tok(pp)} | ${tok(td)} |`);
   }
 
   // Table 2: Compression ratio vs raw HTML
   console.log('');
   console.log('## Compression Ratio (% token reduction vs Raw HTML)');
   console.log('');
-  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer |');
-  console.log('|------|----------|---------------|------------|-----------|');
+  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |');
+  console.log('|------|----------|---------------|------------|-----------|--------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
@@ -379,21 +534,22 @@ async function main() {
     const ab = find(agentBr.results, name);
     const pw = find(playwrightRes.results, name);
     const pp = find(puppeteerRes.results, name);
+    const td = find(tandemRes.results, name);
 
     const ratio = (tool, baseline) => {
       if (!tool?.success || !baseline?.htmlTokens) return '—';
       return ((1 - tool.outputTokens / baseline.htmlTokens) * 100).toFixed(1) + '%';
     };
 
-    console.log(`| ${name} | ${ratio(ch, html)} | ${ratio(ab, html)} | ${ratio(pw, html)} | ${ratio(pp, html)} |`);
+    console.log(`| ${name} | ${ratio(ch, html)} | ${ratio(ab, html)} | ${ratio(pw, html)} | ${ratio(pp, html)} | ${ratio(td, html)} |`);
   }
 
   // Table 3: Speed — Observe/Snapshot
   console.log('');
   console.log('## Speed — DOM Extraction');
   console.log('');
-  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer |');
-  console.log('|------|----------|---------------|------------|-----------|');
+  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |');
+  console.log('|------|----------|---------------|------------|-----------|--------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
@@ -401,18 +557,19 @@ async function main() {
     const ab = find(agentBr.results, name);
     const pw = find(playwrightRes.results, name);
     const pp = find(puppeteerRes.results, name);
+    const td = find(tandemRes.results, name);
 
     const ms = r => r?.success ? formatMs(r.observeTime) : '❌';
 
-    console.log(`| ${name} | ${ms(ch)} | ${ms(ab)} | ${ms(pw)} | ${ms(pp)} |`);
+    console.log(`| ${name} | ${ms(ch)} | ${ms(ab)} | ${ms(pw)} | ${ms(pp)} | ${ms(td)} |`);
   }
 
   // Table 4: Elements detected
   console.log('');
   console.log('## Interactive Elements Detected');
   console.log('');
-  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer |');
-  console.log('|------|----------|---------------|------------|-----------|');
+  console.log('| Site | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |');
+  console.log('|------|----------|---------------|------------|-----------|--------|');
 
   for (let i = 0; i < TARGETS.length; i++) {
     const name = TARGETS[i].name;
@@ -420,10 +577,11 @@ async function main() {
     const ab = find(agentBr.results, name);
     const pw = find(playwrightRes.results, name);
     const pp = find(puppeteerRes.results, name);
+    const td = find(tandemRes.results, name);
 
     const n = r => r?.success ? r.elementCount : '❌';
 
-    console.log(`| ${name} | ${n(ch)} | ${n(ab)} | ${n(pw)} | ${n(pp)} |`);
+    console.log(`| ${name} | ${n(ch)} | ${n(ab)} | ${n(pw)} | ${n(pp)} | ${n(td)} |`);
   }
 
   // Summary
@@ -444,6 +602,7 @@ async function main() {
     { name: 'agent-browser', results: agentBr.results, launchTime: agentBr.launchTime, dep: 'Rust binary (direct CDP)' },
     { name: 'Playwright', results: playwrightRes.results, launchTime: playwrightRes.launchTime, dep: 'playwright (full browser framework)' },
     { name: 'Puppeteer', results: puppeteerRes.results, launchTime: puppeteerRes.launchTime, dep: 'puppeteer (Google browser framework)' },
+    { name: 'Tandem', results: tandemRes.results, launchTime: tandemRes.launchTime, dep: 'Electron + CDP AXTree (Tandem Browser approach)' },
   ];
 
   console.log('  Avg Output Tokens:');
