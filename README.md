@@ -151,9 +151,84 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 | **Security Model** | Domain allowlist | None | 6-layer (network, JS AST, behavior) | None | None | None |
 | **Production Maturity** | Early | Production | Developer Preview | Stable | Mature | Mature |
 
-### Cheliped vs OpenClaw Browser — Detailed Comparison
+### Detailed Comparison — All Tools
 
-Cheliped and OpenClaw Browser both solve the same problem — giving AI agents eyes on the web — but with fundamentally different approaches.
+#### Architecture
+
+| | Cheliped | Tandem Browser | agent-browser | Playwright | Puppeteer |
+|:--|:---------|:---------------|:--------------|:-----------|:----------|
+| **Runtime** | Headless Chrome (spawned) | Electron app (GUI) | Rust binary + Chrome | Node.js + Chromium | Node.js + Chrome |
+| **Protocol** | Direct CDP WebSocket | Electron DevTools → CDP | Direct CDP | CDP via abstraction | CDP via abstraction |
+| **API style** | CLI / JS library | HTTP REST API (127.0.0.1:8765) | CLI commands | JS library | JS library |
+| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | CDP `Accessibility.getFullAXTree()` → compact filter → `@ref` labels | CDP AXTree | `ariaSnapshot()` | `accessibility.snapshot()` |
+| **Human-in-the-loop** | No | Yes (Wingman panel, captcha detection) | No | No | No |
+| **Security** | Domain allowlist + prompt guard | 6-layer (network, JS AST, behavior) | None | None | None |
+
+#### Output Format
+
+**Cheliped (Agent DOM)** — Structured JSON with categorized arrays:
+```json
+{
+  "texts": [{"agentId": 1, "tag": "h1", "text": "Example Domain"}],
+  "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
+  "buttons": [], "inputs": []
+}
+```
+
+**Tandem (AXTree Snapshot)** — Indented accessibility tree with `@ref` labels:
+```
+- WebArea "Example Domain" [@e1]
+  - heading "Example Domain" [@e2]
+  - paragraph "This domain is for use..." [@e3]
+  - link "More information..." [@e4]
+```
+
+**Playwright (Aria Snapshot)** — YAML-like flat tree:
+```yaml
+- heading "Example Domain" [level=1]
+- paragraph: This domain is for use in...
+- link "More information..."
+```
+
+**Puppeteer (Accessibility Snapshot)** — JSON tree with roles:
+```json
+{"role": "WebArea", "name": "Example Domain", "children": [
+  {"role": "heading", "name": "Example Domain", "level": 1},
+  {"role": "link", "name": "More information..."}
+]}
+```
+
+#### Feature Comparison
+
+| Feature | Cheliped | Tandem | agent-browser | Playwright | Puppeteer |
+|:--------|:---------|:-------|:--------------|:-----------|:----------|
+| **Element IDs** | Numeric `agentId` | `@ref` (`@e1`) | None | CSS selectors | CSS selectors |
+| **Click/Fill** | By agentId | By @ref | N/A | By locator | By selector |
+| **Human typing** | `fillHuman()` | BehaviorReplay | N/A | N/A | N/A |
+| **Content extraction** | Semantic DOM pipeline | Structured by page type | Raw text | A11y tree | A11y tree |
+| **Captcha detection** | No | Auto-detect + show | No | No | No |
+| **Stealth patches** | No | Yes | No | No | No |
+| **Session isolation** | User data dir | X-Session + partition | No | Browser context | Browser context |
+| **Multi-tab** | No | Yes (250+ endpoints) | No | Yes | Yes |
+| **Messenger integration** | No | Telegram, Slack, etc. | No | No | No |
+| **Persistent panels** | No | Bookmarks, Workspaces | No | No | No |
+
+#### When to Use Which
+
+| Scenario | Recommended | Why |
+|:---------|:-----------|:----|
+| **Quick page scan** | Cheliped | Fastest extraction (44ms), fewest tokens (2,588) |
+| **Complex SPA interaction** | Playwright | Full auto-wait, robust locator API |
+| **Structured data extraction** | Cheliped | Categorized arrays (texts/links/buttons/inputs) are immediately parseable |
+| **Lightweight skill integration** | Cheliped | Zero framework deps (ws only), self-contained CLI |
+| **Secure human-AI browsing** | Tandem | 6-layer security, captcha detection, human-in-the-loop |
+| **Human + AI co-browsing** | Tandem | Wingman panel, persistent messenger panels, shared live workflow |
+| **Browser testing / E2E** | Playwright | Mature framework, auto-wait, trace recording |
+| **Headless scripting** | Puppeteer | Google-backed, lightweight, well-documented |
+
+### OpenClaw Internal Browser — Separate Comparison
+
+OpenClaw's internal browser runs as an HTTP gateway service (not a standalone library), so it is benchmarked separately against Cheliped.
 
 #### Architecture
 
@@ -164,16 +239,7 @@ Cheliped and OpenClaw Browser both solve the same problem — giving AI agents e
 | **API style** | CLI JSON commands / JS library | HTTP REST API via gateway |
 | **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | Playwright `ariaSnapshot()` / `_snapshotForAI()` |
 
-#### Output Format Comparison
-
-**Cheliped (Agent DOM)** — Structured JSON with categorized arrays:
-```json
-{
-  "texts": [{"agentId": 1, "tag": "h1", "text": "Example Domain"}],
-  "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
-  "buttons": [], "inputs": []
-}
-```
+#### Output Format
 
 **OpenClaw (AI Snapshot)** — YAML-like accessibility tree with ref tokens:
 ```yaml
@@ -199,90 +265,7 @@ Cheliped and OpenClaw Browser both solve the same problem — giving AI agents e
 
 ![Cheliped vs OpenClaw: Speed](docs/images/benchmark-openclaw-speed.png)
 
-#### When to Use Which
-
-| Scenario | Recommended | Why |
-|:---------|:-----------|:----|
-| **Quick page scan** | Cheliped | 16x faster extraction, 2x fewer tokens |
-| **Complex SPA interaction** | OpenClaw | Full Playwright auto-wait, better SPA support |
-| **Token-critical workloads** | OpenClaw efficient | 4,251 avg tokens (interactive-only mode) |
-| **Structured data extraction** | Cheliped | Categorized arrays (texts/links/buttons/inputs) are immediately parseable |
-| **Full-featured agent platform** | OpenClaw | Tabs, downloads, file uploads, dialog handling, trace recording |
-| **Lightweight skill integration** | Cheliped | Zero framework deps (ws only), self-contained CLI |
-| **Secure human-AI browsing** | Tandem | 6-layer security, captcha detection, human-in-the-loop |
-| **Human + AI co-browsing** | Tandem | Wingman panel, persistent messenger panels, shared live workflow |
-| **Secure human-AI browsing** | Tandem | 6-layer security, captcha detection, human-in-the-loop |
-
-### Cheliped vs Tandem Browser — Detailed Comparison
-
-Tandem Browser is an Electron-based browser built for human-AI collaboration with OpenClaw. It provides a local HTTP API (250+ endpoints) and uses CDP's `Accessibility.getFullAXTree()` for page snapshots.
-
-#### Architecture
-
-| | Cheliped | Tandem Browser |
-|:--|:---------|:---------------|
-| **Runtime** | Headless Chrome (spawned) | Electron app (GUI) |
-| **Protocol** | Direct CDP WebSocket | Electron DevTools → CDP |
-| **API style** | CLI / JS library | HTTP REST API (127.0.0.1:8765) |
-| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | CDP `Accessibility.getFullAXTree()` → compact filter → `@ref` labels |
-| **Human-in-the-loop** | No | Yes (Wingman panel, captcha detection, alert handoff) |
-| **Security** | Domain allowlist + prompt guard | 6-layer (network shield, outbound guard, JS AST analysis, behavior monitoring, gatekeeper channel, layer separation) |
-
-#### Output Format Comparison
-
-**Cheliped (Agent DOM)** — Structured JSON with categorized arrays:
-```json
-{
-  "texts": [{"agentId": 1, "tag": "h1", "text": "Example Domain"}],
-  "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
-  "buttons": [], "inputs": []
-}
-```
-
-**Tandem (AXTree Snapshot)** — Indented accessibility tree with `@ref` labels:
-```
-- WebArea "Example Domain" [@e1]
-  - heading "Example Domain" [@e2]
-  - paragraph "This domain is for use..." [@e3]
-  - link "More information..." [@e4]
-```
-
-#### Token Output & Speed
-
-| Site | Cheliped | Tandem (compact AXTree) | Cheliped Speed | Tandem Speed |
-|:-----|--------:|------------------------:|--------------:|--------------:|
-| Hacker News | **2,638** | 14,058 | **26ms** | 49ms |
-| Wikipedia | **4,489** | 37,655 | **125ms** | 151ms |
-| GitHub | 4,132 | **3,849** | **66ms** | 89ms |
-| Example.com | 128 | **103** | **9ms** | 65ms |
-| React (TodoMVC) | 601 | **154** | **4ms** | 6ms |
-| MDN Web Docs | **3,538** | 7,965 | **32ms** | 123ms |
-| **Average** | **2,588** | **10,631** | **44ms** | **81ms** |
-
-![Cheliped vs Tandem](docs/images/benchmark-tandem-comparison.png)
-
-**Key takeaways:**
-- Cheliped produces **4x fewer tokens** on average (2,588 vs 10,631)
-- Cheliped is **2x faster** on extraction (44ms vs 81ms)
-- Tandem's AXTree includes all accessibility nodes (semantic + structural), resulting in higher token counts
-- Tandem excels at minimal SPAs (React TodoMVC: 154 vs 601 tokens) where the AXTree is naturally compact
-- Cheliped's custom DOM pipeline aggressively compresses content-heavy pages (Wikipedia: 4,489 vs 37,655)
-
-#### Feature Comparison
-
-| Feature | Cheliped | Tandem |
-|:--------|:---------|:-------|
-| **Snapshot format** | JSON arrays | Indented text |
-| **Click/Fill** | By `agentId` (numeric) | By `@ref` (string) |
-| **Human typing simulation** | `fillHuman()` (random delays) | BehaviorReplay (real timing data) |
-| **Content extraction** | Semantic DOM pipeline | Structured by page type (article/product/profile/search) |
-| **Captcha detection** | No | Auto-detect + show to human |
-| **Stealth patches** | No | Yes (anti-fingerprinting) |
-| **Session isolation** | User data dir | X-Session header + partition |
-| **Multi-tab** | No | Yes (250+ endpoints) |
-| **Headless mode** | Default | Background BrowserWindow |
-| **Messenger integration** | No | Telegram, Slack, Discord, Gmail, etc. |
-| **Persistent panels** | No | Bookmarks, History, Workspaces, Pinboards |
+> OpenClaw's efficient mode (`interactive=true` + `compact=true` + `maxDepth=6`) achieves the lowest token count (4,251 avg) by returning only interactive elements. However, it runs 16x slower (1,280ms) due to the Playwright abstraction layer.
 
 ### Performance at a Glance
 
