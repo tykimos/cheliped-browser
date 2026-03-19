@@ -231,6 +231,38 @@ async function executeCommand(cheliped, cmdObj) {
       return await cheliped.extract(type);
     }
 
+    case 'setup-downloads': {
+      const downloadPath = args[0] || '/tmp/cheliped-downloads';
+      await cheliped.setupDownloads(downloadPath);
+      return { success: true, downloadPath };
+    }
+
+    case 'download': {
+      const url = args[0];
+      const downloadPath = args[1] || '/tmp/cheliped-downloads';
+      if (!url) throw new Error('download: URL이 필요합니다.');
+      const result = await cheliped.download(url, downloadPath);
+      return result;
+    }
+
+    case 'download-click': {
+      const agentId = parseInt(args[0], 10);
+      const downloadPath = args[1] || '/tmp/cheliped-downloads';
+      const timeout = parseInt(args[2] || '60000', 10);
+      if (isNaN(agentId)) throw new Error('download-click: 유효한 agentId(숫자)가 필요합니다.');
+      const result = await cheliped.downloadByClick(agentId, downloadPath, timeout);
+      return result;
+    }
+
+    case 'download-js': {
+      const jsExpr = args[0];
+      const downloadPath = args[1] || '/tmp/cheliped-downloads';
+      const timeout = parseInt(args[2] || '60000', 10);
+      if (!jsExpr) throw new Error('download-js: JavaScript 코드가 필요합니다.');
+      const result = await cheliped.downloadByJs(jsExpr, downloadPath, timeout);
+      return result;
+    }
+
     case 'close': {
       const session = loadSession();
       await cheliped.close();

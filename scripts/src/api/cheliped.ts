@@ -1,4 +1,5 @@
 import { tmpdir } from 'os';
+import { join } from 'path';
 import { CDPConnection } from '../cdp/connection.js';
 import { BrowserController } from '../browser/controller.js';
 import { AgentDomBuilder } from '../dom/agent-dom.js';
@@ -313,10 +314,86 @@ export class Cheliped {
     return this.controller!.runJs(script);
   }
 
-  async download(url: string): Promise<DownloadResult> {
+  async download(url: string, downloadPath?: string): Promise<DownloadResult> {
     this.ensureLaunched();
-    const downloadPath = this.options.downloadPath || tmpdir();
-    return this.controller!.download(url, downloadPath);
+    const path = downloadPath || this.options.downloadPath || tmpdir();
+    return this.controller!.download(url, path);
+  }
+
+  /** Set up download behavior to allow downloads to a specific path. */
+  async setupDownloads(downloadPath?: string): Promise<void> {
+    this.ensureLaunched();
+    const path = downloadPath || this.options.downloadPath || tmpdir();
+    await this.controller!.setupDownloads(path);
+  }
+
+  /** Click an element and wait for a download to complete. */
+  async downloadByClick(agentId: number, downloadPath?: string, timeout?: number): Promise<DownloadResult> {
+    this.ensureLaunched();
+    const backendNodeId = this.agentDomBuilder.resolveAgentId(agentId);
+    if (backendNodeId === undefined) {
+      throw new Error(`Agent DOM ID ${agentId} not found. Call observe() first to get current Agent DOM.`);
+    }
+    const path = downloadPath || this.options.downloadPath || tmpdir();
+    return this.controller!.downloadByClick(backendNodeId, path, timeout);
+  }
+
+  /** Click by JS (run-js based click) and wait for download. Uses setupDownloads + event listeners. */
+  async downloadByJs(jsExpression: string, downloadPath?: string, timeout: number = 60000): Promise<DownloadResult> {
+    this.ensureLaunched();
+    const path = downloadPath || this.options.downloadPath || tmpdir();
+    await this.controller!.setupDownloads(path);
+
+    return new Promise<DownloadResult>((resolve, reject) => {
+      const transport = this.connection!.getTransport();
+      let downloadGuid: string | null = null;
+      let filename = '';
+      let timeoutTimer: ReturnType<typeof setTimeout>;
+      let settled = false;
+
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutTimer);
+        transport.off('Browser.downloadWillBegin', onBegin);
+        transport.off('Browser.downloadProgress', onProgress);
+      };
+
+      const onBegin = (params: any) => {
+        downloadGuid = params.guid;
+        filename = params.suggestedFilename || 'download';
+      };
+
+      const onProgress = (params: any) => {
+        if (params.guid !== downloadGuid) return;
+        if (params.state === 'completed') {
+          cleanup();
+          resolve({
+            success: true,
+            filePath: join(path, filename),
+            filename,
+            size: params.receivedBytes || 0,
+          });
+        } else if (params.state === 'canceled') {
+          cleanup();
+          reject(new Error('Download was canceled'));
+        }
+      };
+
+      transport.on('Browser.downloadWillBegin', onBegin);
+      transport.on('Browser.downloadProgress', onProgress);
+
+      timeoutTimer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`Download timed out after ${timeout}ms`));
+      }, timeout);
+
+      // Execute JS to trigger download
+      this.controller!.runJs(jsExpression).catch(err => {
+        cleanup();
+        reject(err);
+      });
+    });
   }
 
   getSecurityViolations() {
