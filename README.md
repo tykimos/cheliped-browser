@@ -470,16 +470,24 @@ node scripts/cheliped-cli.mjs '[{"cmd":"monitor-stop"}]'
 
 The monitor uses CDP [`Page.startScreencast`](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-startScreencast) to stream JPEG frames from Chrome to a lightweight web viewer via Server-Sent Events (SSE).
 
+```mermaid
+sequenceDiagram
+    participant C as Chrome (headless)
+    participant M as Monitor Server (:19222)
+    participant V as Browser Viewer
+
+    M->>C: Target.attachToTarget
+    M->>C: Page.startScreencast
+
+    loop Every visual change
+        C->>M: screencastFrame (JPEG)
+        M->>V: SSE data: {frame}
+        V->>V: <img> update
+        M->>C: screencastFrameAck
+    end
 ```
-Chrome (headless)           Monitor Server (:19222)           Browser Viewer
-    │                              │                               │
-    │◄─ Target.attachToTarget ────│                               │
-    │◄─ Page.startScreencast ─────│                               │
-    │                              │                               │
-    │── screencastFrame (JPEG) ──►│── SSE data: {frame} ────────►│ <img> update
-    │── screencastFrame ─────────►│── SSE data: {frame} ────────►│ <img> update
-    │       ...                    │       ...                      │
-```
+
+![Cheliped Monitor — real-time browser viewer](docs/images/monitor-viewer.png)
 
 **Features:**
 - Dark-themed compact UI with live/disconnected status indicator
