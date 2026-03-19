@@ -679,24 +679,114 @@ cheliped-browser/
     └── examples/               # Demo scripts
 ```
 
-### How the Agent DOM pipeline works
+### Agent DOM Pipeline
 
+The core concept of Cheliped is the **Agent DOM** — a compressed, LLM-friendly representation of a web page. Here's how a raw DOM tree is transformed into an Agent DOM:
+
+```mermaid
+flowchart LR
+    subgraph Chrome["Chrome (CDP)"]
+        DOM["Raw DOM Tree\n~130K tokens"]
+        IFrame["iframe Content"]
+    end
+
+    subgraph Pipeline["Agent DOM Pipeline"]
+        EXT["DomExtractor\nFull tree + iframes\n(parallel extraction)"]
+        FIL["DomFilter\nRemove hidden,\nscript, style"]
+        SEM["SemanticExtractor\nCategorize:\nbutton, link,\ninput, text..."]
+        CMP["TokenCompressor\nTruncate text,\nlimit counts"]
+        BLD["AgentDomBuilder\nAssign agentId\n→ backendNodeId\nmapping"]
+    end
+
+    subgraph Output["Agent DOM (~2.5K tokens)"]
+        JSON["buttons: [{id:3, text}]\nlinks: [{id:6, href}]\ninputs: [{id:5, type}]\ntexts: [{id:8, text}]"]
+    end
+
+    DOM --> EXT
+    IFrame -.-> EXT
+    EXT --> FIL --> SEM --> CMP --> BLD --> JSON
+
+    style Chrome fill:#1a1a2e,stroke:#30363d,color:#c9d1d9
+    style Pipeline fill:#0d1117,stroke:#30363d,color:#c9d1d9
+    style Output fill:#0d2818,stroke:#3fb950,color:#c9d1d9
 ```
-Raw DOM Tree
-    │
-    ▼
-┌─────────────┐     ┌────────────┐     ┌──────────────┐     ┌────────────┐
-│  Extractor  │────▶│   Filter   │────▶│  Semantic    │────▶│ Compressor │
-│ (full tree) │     │ (visible)  │     │ (group+label)│     │ (truncate) │
-└─────────────┘     └────────────┘     └──────────────┘     └────────────┘
-                                                                   │
-                                                                   ▼
-                                                            ┌────────────┐
-                                                            │ Agent DOM  │
-                                                            │ {nodes,    │
-                                                            │  texts,    │
-                                                            │  links}    │
-                                                            └────────────┘
+
+### Observe-Act Loop & ID Mapping
+
+The agent interacts with pages through a simple **observe → act → observe** loop. The key mechanism is the `agentId ↔ backendNodeId` mapping:
+
+```mermaid
+flowchart TB
+    subgraph Agent["AI Agent (LLM)"]
+        OBS["observe()"]
+        ACT["act(agentId, action)"]
+        REASON["Reason about\nAgent DOM JSON"]
+    end
+
+    subgraph Cheliped["Cheliped Core"]
+        ADOM["AgentDomBuilder\nidMap: agentId → backendNodeId"]
+        RESOLVE["resolveAgentId(3)\n→ backendNodeId: 847"]
+        CTRL["BrowserController\nclick / fill / select\nby backendNodeId"]
+    end
+
+    subgraph CDP["Chrome DevTools Protocol"]
+        DOMAPI["DOM.getDocument\nDOM.getBoxModel\nDOM.resolveNode"]
+        INPUT["Input.dispatchMouseEvent\nInput.insertText\nDOM.focus"]
+    end
+
+    OBS --> ADOM
+    ADOM -->|"Agent DOM JSON\n{buttons:[{id:3,...}]}"| REASON
+    REASON -->|"click 3"| ACT
+    ACT --> RESOLVE
+    RESOLVE --> CTRL
+    CTRL --> DOMAPI
+    CTRL --> INPUT
+    INPUT -->|"Page state changed"| OBS
+
+    style Agent fill:#1c1917,stroke:#f0883e,color:#c9d1d9
+    style Cheliped fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
+    style CDP fill:#1a1a2e,stroke:#30363d,color:#c9d1d9
+```
+
+### Element Category Classification
+
+The semantic extractor classifies DOM elements into 8 categories. Only non-empty categories are included in the output (token optimization):
+
+```mermaid
+flowchart LR
+    subgraph HTML["HTML Elements"]
+        BTN["button\n[role=button]"]
+        A["a[href]\n[role=link]"]
+        INP["input\n[role=textbox]\n[role=checkbox]"]
+        SEL["select"]
+        TA["textarea"]
+        FORM["form"]
+        TXT["h1-h6, p, li\nlabel, span, td"]
+        IMG["img"]
+    end
+
+    subgraph AgentDom["Agent DOM Categories"]
+        B["buttons[]"]
+        L["links[]"]
+        I["inputs[]"]
+        S["selects[]"]
+        T2["textareas[]"]
+        F["forms[]"]
+        TX["texts[]"]
+        IM["images[]"]
+    end
+
+    BTN --> B
+    A --> L
+    INP --> I
+    SEL --> S
+    TA --> T2
+    FORM --> F
+    TXT --> TX
+    IMG --> IM
+
+    style HTML fill:#1a1a2e,stroke:#30363d,color:#c9d1d9
+    style AgentDom fill:#0d2818,stroke:#3fb950,color:#c9d1d9
 ```
 
 ---
