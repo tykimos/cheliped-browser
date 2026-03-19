@@ -115,7 +115,7 @@ AI agent platforms *could* give LLMs direct access to Playwright or Puppeteer. B
 |:--|:-----------------|:-----------------------------|
 | **LLM must know** | 10 simple commands (`goto`, `observe`, `click`, `fill`, ...) | Hundreds of API methods, CSS selector syntax, async patterns |
 | **Interaction** | `click 3` (numeric ID) | `page.click('button.submit-form:nth-child(2)')` (fragile selector) |
-| **Token cost** | ~3,512 tokens avg | ~5,000–12,000 tokens avg |
+| **Token cost** | ~1,932 tokens avg | ~5,000–12,000 tokens avg |
 | **Context needed** | SKILL.md (~80 lines) | Full API docs (thousands of lines) |
 | **Error recovery** | Simple JSON errors | Stack traces, timeout errors, selector not found |
 | **Install** | `npm install` (ws only) | Full browser framework + browser binary |
@@ -134,13 +134,13 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 
 ## ⚖️ How Does It Compare?
 
-> Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2025-03-18 · v1.0.0
+> Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2026-03-20 · v0.2.1
 
 | | Cheliped | OpenClaw Browser | Tandem Browser | agent-browser | Playwright | Puppeteer |
 |:--|:---------|:-----------------|:---------------|:--------------|:-----------|:----------|
 | **Best for** | LLM agent browsing | Full-featured agent platform | Human-AI co-browsing | CLI automation | Full browser testing | Headless scripting |
-| **Avg Tokens** | **2,588** | 16,762 (4,251 efficient) | 10,631 | 11,802 | 5,672 | 5,020 |
-| **Avg Speed** | **44ms** | 1,280ms | 81ms | 208ms | 69ms | 63ms |
+| **Avg Tokens** | **2,198** | 16,762 (4,251 efficient) | 10,631 | 11,802 | 5,672 | 5,020 |
+| **Avg Speed** | **33ms** | 1,280ms | 81ms | 208ms | 69ms | 63ms |
 | **Quality** | **88.9%** | — | — | 72.9% | 75.6% | 73.7% |
 | **Output Format** | Structured JSON (categorized arrays) | YAML accessibility tree | Indented AXTree text | Raw text | Flat a11y tree | Flat a11y tree |
 | **Element IDs** | Numeric `agentId` | Symbolic `[ref=eN]` | `@ref` labels (`@e1`) | None | CSS selectors | CSS selectors |
@@ -793,20 +793,20 @@ flowchart LR
 
 ## 📊 Benchmark
 
-> **Date**: 2025-03-18 · **Versions**: Cheliped 1.0.0, agent-browser 0.20.14, Playwright 1.58.2, Puppeteer 22.15.0
+> **Date**: 2026-03-20 · **Versions**: Cheliped 0.2.1, agent-browser 0.20.14, Playwright 1.58.2, Puppeteer 22.15.0
 > **Sites**: Hacker News, Wikipedia, GitHub Trending, Example.com, React TodoMVC (SPA), MDN Web Docs · **Environment**: macOS, Node.js 24, Chrome
 
 ### Token Efficiency
 
 | Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
 |:-----|--------:|---------:|--------------:|-----------:|----------:|-------:|
-| Hacker News | 8,603 | **2,638** | 15,038 | 9,892 | 4,696 | 14,058 |
-| Wikipedia | 71,151 | **4,489** | 39,475 | 15,417 | 19,744 | 37,655 |
-| GitHub | 130,734 | 4,132 | 4,026 | 2,275 | **1,505** | 3,849 |
-| Example.com | 132 | 128 | 120 | **58** | 71 | 103 |
+| Hacker News | 8,685 | **2,196** | 15,038 | 9,892 | 4,696 | 14,058 |
+| Wikipedia | 123,643 | **2,774** | 39,475 | 15,417 | 19,744 | 37,655 |
+| GitHub | 147,484 | 3,363 | 4,026 | 2,275 | **1,505** | 3,849 |
+| Example.com | 129 | 92 | 120 | **58** | 71 | 103 |
 | React (SPA) | 278 | 601 | 1,016 | 488 | 388 | **154** |
-| MDN Web Docs | 24,987 | **3,538** | 11,138 | 5,901 | 3,717 | 7,965 |
-| **Average** | **39,314** | **2,588** | **11,802** | **5,672** | **5,020** | **10,631** |
+| MDN Web Docs | 17,729 | **2,567** | 11,138 | 5,901 | 3,717 | 7,965 |
+| **Average** | **49,658** | **1,932** | **11,802** | **5,672** | **5,020** | **10,631** |
 
 ![Tokens per Site](docs/images/benchmark-tokens-per-site.png)
 
@@ -814,13 +814,13 @@ flowchart LR
 
 | Site | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
 |:-----|--------:|--------------:|-----------:|----------:|-------:|
-| Hacker News | **26ms** | 215ms | 79ms | 77ms | 49ms |
-| Wikipedia | 125ms | 269ms | **67ms** | 144ms | 151ms |
-| GitHub | **66ms** | 224ms | 83ms | 92ms | 89ms |
-| Example.com | **9ms** | 173ms | 24ms | 22ms | 65ms |
+| Hacker News | **19ms** | 215ms | 79ms | 77ms | 49ms |
+| Wikipedia | 58ms | 269ms | **67ms** | 144ms | 151ms |
+| GitHub | **65ms** | 224ms | 83ms | 92ms | 89ms |
+| Example.com | **2ms** | 173ms | 24ms | 22ms | 65ms |
 | React (SPA) | **4ms** | 173ms | 33ms | 10ms | 6ms |
-| MDN Web Docs | **32ms** | 193ms | 128ms | 30ms | 123ms |
-| **Average** | **44ms** | **208ms** | **69ms** | **63ms** | **81ms** |
+| MDN Web Docs | **23ms** | 193ms | 128ms | 30ms | 123ms |
+| **Average** | **29ms** | **208ms** | **69ms** | **63ms** | **81ms** |
 
 ![Speed per Site](docs/images/benchmark-speed-per-site.png)
 
