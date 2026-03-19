@@ -23,6 +23,9 @@ export class Cheliped {
   private connection: CDPConnection | null = null;
   private controller: BrowserController | null = null;
   private agentDomBuilder: AgentDomBuilder = new AgentDomBuilder();
+  private _extractor = new DomExtractor();
+  private _domFilter = new DomFilter();
+  private _semanticExtractor = new SemanticExtractor();
   private graphBuilder = new UIGraphBuilder();
   private actionGenerator = new ActionGenerator();
   private sessionManager: SessionManager | null = null;
@@ -87,13 +90,9 @@ export class Cheliped {
     this.ensureLaunched();
     const transport = this.connection!.getTransport();
 
-    const extractor = new DomExtractor();
-    const domFilter = new DomFilter();
-    const semanticExtractor = new SemanticExtractor();
-
-    const rawTree = await extractor.extractDomTree(transport);
-    const filtered = domFilter.filter(rawTree);
-    let elements = semanticExtractor.extract(filtered);
+    const rawTree = await this._extractor.extractDomTree(transport);
+    const filtered = this._domFilter.filter(rawTree);
+    let elements = this._semanticExtractor.extract(filtered);
 
     if (this.options.compression && this.options.compression.enabled !== false) {
       const compressor = new TokenCompressor(this.options.compression);
@@ -247,7 +246,7 @@ export class Cheliped {
       throw new Error(`Agent DOM ID ${agentId} not found. Call observe() first to get current Agent DOM.`);
     }
     await this.controller!.selectByBackendNodeId(backendNodeId, optionValue);
-    return { success: true, action: 'click', agentId };
+    return { success: true, action: 'select', agentId };
   }
 
   async extract(type: 'text' | 'links' | 'all'): Promise<ExtractResult> {
@@ -306,7 +305,14 @@ export class Cheliped {
   async screenshot(): Promise<ScreenshotResult> {
     this.ensureLaunched();
     const buffer = await this.controller!.screenshot();
-    return { buffer, width: 0, height: 0 };
+    // Parse PNG header for dimensions (width at byte 16, height at byte 20, big-endian uint32)
+    let width = 0;
+    let height = 0;
+    if (buffer.length > 24 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+      width = buffer.readUInt32BE(16);
+      height = buffer.readUInt32BE(20);
+    }
+    return { buffer, width, height };
   }
 
   async runJs(script: string): Promise<unknown> {

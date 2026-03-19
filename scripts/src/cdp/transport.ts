@@ -65,7 +65,16 @@ export class CDPTransport {
         return;
       }
 
-      this.ws.once('close', () => resolve());
+      const timeout = setTimeout(() => {
+        this._connected = false;
+        try { this.ws?.terminate(); } catch {}
+        resolve();
+      }, 5000);
+
+      this.ws.once('close', () => {
+        clearTimeout(timeout);
+        resolve();
+      });
       this.ws.close();
     });
   }

@@ -25,27 +25,24 @@ export class AgentDomBuilder {
     this.idMap.clear();
     let nextId = 1;
 
-    const result: AgentDom = {
-      url,
-      title,
-      buttons: [],
-      links: [],
-      inputs: [],
-      selects: [],
-      textareas: [],
-      forms: [],
-      texts: [],
-      images: [],
-      timestamp: Date.now(),
-    };
+    const buttons: AgentDomNode[] = [];
+    const links: AgentDomNode[] = [];
+    const inputs: AgentDomNode[] = [];
+    const selects: AgentDomNode[] = [];
+    const textareas: AgentDomNode[] = [];
+    const forms: AgentDomNode[] = [];
+    const texts: AgentDomNode[] = [];
+    const images: AgentDomNode[] = [];
 
     for (const el of elements) {
       const agentId = nextId++;
       this.idMap.set(agentId, el.backendNodeId);
 
+      // TOK-5: Only include text if non-empty
+      const text = el.text?.trim();
       const node: AgentDomNode = {
         id: agentId,
-        ...(el.text !== undefined && { text: el.text }),
+        ...(text && { text }),
         ...(el.placeholder && { placeholder: el.placeholder }),
         ...(el.href && { href: this.resolveUrl(el.href, url) }),
         ...(el.src && { src: el.src }),
@@ -56,32 +53,31 @@ export class AgentDomBuilder {
       };
 
       switch (el.category) {
-        case 'button':
-          result.buttons.push(node);
-          break;
-        case 'link':
-          result.links.push(node);
-          break;
-        case 'input':
-          result.inputs.push(node);
-          break;
-        case 'select':
-          result.selects.push(node);
-          break;
-        case 'textarea':
-          result.textareas.push(node);
-          break;
-        case 'form':
-          result.forms.push(node);
-          break;
-        case 'text':
-          result.texts.push(node);
-          break;
-        case 'image':
-          result.images.push(node);
-          break;
+        case 'button': buttons.push(node); break;
+        case 'link': links.push(node); break;
+        case 'input': inputs.push(node); break;
+        case 'select': selects.push(node); break;
+        case 'textarea': textareas.push(node); break;
+        case 'form': forms.push(node); break;
+        case 'text': texts.push(node); break;
+        case 'image': images.push(node); break;
       }
     }
+
+    // TOK-1: Only include non-empty arrays to reduce token count
+    const result: AgentDom = {
+      url,
+      title,
+      ...(buttons.length > 0 && { buttons }),
+      ...(links.length > 0 && { links }),
+      ...(inputs.length > 0 && { inputs }),
+      ...(selects.length > 0 && { selects }),
+      ...(textareas.length > 0 && { textareas }),
+      ...(forms.length > 0 && { forms }),
+      ...(texts.length > 0 && { texts }),
+      ...(images.length > 0 && { images }),
+      timestamp: Date.now(),
+    };
 
     return result;
   }
@@ -94,6 +90,7 @@ export class AgentDomBuilder {
     transport: CDPTransport,
     compression?: CompressionOptions,
     maxDepth?: number,
+    includeTiming?: boolean,
   ): Promise<AgentDom & { _timing?: Record<string, number> }> {
     const timing: Record<string, number> = {};
     let t0 = Date.now();
@@ -136,6 +133,9 @@ export class AgentDomBuilder {
     timing.total = Object.values(timing).reduce((a, b) => a + b, 0);
 
     const result = this.build(elements, urlValue, titleValue);
-    return { ...result, _timing: timing };
+    if (includeTiming) {
+      return { ...result, _timing: timing };
+    }
+    return result;
   }
 }

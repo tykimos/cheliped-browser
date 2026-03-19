@@ -12,7 +12,7 @@ export interface ObserveResult {
 
 export interface ActResult {
   success: boolean;
-  action: 'click' | 'fill' | 'type' | 'focus' | 'press-key';
+  action: 'click' | 'fill' | 'select' | 'type' | 'focus' | 'press-key';
   agentId: number;
   selector?: string;
 }

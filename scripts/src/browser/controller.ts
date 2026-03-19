@@ -99,20 +99,44 @@ export class BrowserController {
       throw new Error(`Element not found for selector: ${selector}`);
     }
 
-    // 3. Get box model for coordinates
-    const boxResult = await this.transport.send('DOM.getBoxModel', {
-      nodeId,
-    }) as Record<string, unknown>;
+    // 3. Get box model for coordinates, with fallback for zero-size elements
+    try {
+      const boxResult = await this.transport.send('DOM.getBoxModel', {
+        nodeId,
+      }) as Record<string, unknown>;
 
-    const model = boxResult.model as Record<string, unknown>;
-    const content = model.content as number[];
+      const model = boxResult.model as Record<string, unknown>;
+      const content = model.content as number[];
 
-    // 4. Calculate center from quad [x1,y1,x2,y2,x3,y3,x4,y4]
-    const x = (content[0] + content[2] + content[4] + content[6]) / 4;
-    const y = (content[1] + content[3] + content[5] + content[7]) / 4;
+      // 4. Calculate center from quad [x1,y1,x2,y2,x3,y3,x4,y4]
+      const x = (content[0] + content[2] + content[4] + content[6]) / 4;
+      const y = (content[1] + content[3] + content[5] + content[7]) / 4;
 
-    // 5. Dispatch mouse events
-    await this._dispatchClick(x, y);
+      // Check for zero-size element
+      if (x === 0 && y === 0) {
+        throw new Error('zero-size element');
+      }
+
+      // 5. Dispatch mouse events
+      await this._dispatchClick(x, y);
+    } catch {
+      // Fallback: use JS click for zero-size or hidden elements
+      const describeResult = await this.transport.send('DOM.describeNode', {
+        nodeId,
+      }) as Record<string, unknown>;
+      const node = describeResult.node as Record<string, unknown>;
+      const backendNodeId = node.backendNodeId as number;
+      const resolveResult = await this.transport.send('DOM.resolveNode', {
+        backendNodeId,
+      }) as Record<string, unknown>;
+      const remoteObject = resolveResult.object as Record<string, unknown>;
+      const objectId = remoteObject.objectId as string;
+      await this.transport.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() { this.scrollIntoView(); this.click(); }`,
+        returnByValue: true,
+      });
+    }
     await this.page.waitForStable();
   }
 
@@ -249,12 +273,7 @@ export class BrowserController {
       // fallback: just use focus
     }
 
-    // 6. Re-focus after click (click might shift focus)
-    await this.transport.send('DOM.focus', {
-      backendNodeId,
-    });
-
-    // 7. Type character by character using Input.insertText (IME-compatible)
+    // 6. Type character by character using Input.insertText (IME-compatible)
     for (const char of text) {
       await this.transport.send('Input.insertText', {
         text: char,
@@ -264,7 +283,7 @@ export class BrowserController {
       await new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    // 8. Dispatch input/change events for framework reactivity
+    // 7. Dispatch input/change events for framework reactivity
     await this.transport.send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: `function() {
@@ -375,45 +394,6 @@ export class BrowserController {
     });
   }
 
-  /**
-   * Map a character to proper CDP key/code values.
-   */
-  private _charToKeyInfo(char: string): { key: string; code: string } {
-    // Digits
-    if (char >= '0' && char <= '9') {
-      return { key: char, code: `Digit${char}` };
-    }
-    // Lowercase letters
-    if (char >= 'a' && char <= 'z') {
-      return { key: char, code: `Key${char.toUpperCase()}` };
-    }
-    // Uppercase letters
-    if (char >= 'A' && char <= 'Z') {
-      return { key: char, code: `Key${char}` };
-    }
-    // Space
-    if (char === ' ') {
-      return { key: ' ', code: 'Space' };
-    }
-    // Common punctuation
-    const punctuation: Record<string, string> = {
-      '-': 'Minus', '=': 'Equal', '[': 'BracketLeft', ']': 'BracketRight',
-      '\\': 'Backslash', ';': 'Semicolon', "'": 'Quote', ',': 'Comma',
-      '.': 'Period', '/': 'Slash', '`': 'Backquote',
-      '!': 'Digit1', '@': 'Digit2', '#': 'Digit3', '$': 'Digit4',
-      '%': 'Digit5', '^': 'Digit6', '&': 'Digit7', '*': 'Digit8',
-      '(': 'Digit9', ')': 'Digit0', '_': 'Minus', '+': 'Equal',
-      '{': 'BracketLeft', '}': 'BracketRight', '|': 'Backslash',
-      ':': 'Semicolon', '"': 'Quote', '<': 'Comma', '>': 'Period',
-      '?': 'Slash', '~': 'Backquote',
-    };
-    if (punctuation[char]) {
-      return { key: char, code: punctuation[char] };
-    }
-    // Korean / Unicode / unknown: key=char, code=Unidentified (CDP text field handles insertion)
-    return { key: char, code: 'Unidentified' };
-  }
-
   async fill(selector: string, text: string): Promise<void> {
     await this.transport.send('Runtime.evaluate', {
       expression: `
@@ -467,10 +447,10 @@ export class BrowserController {
     const wsHandled = await this.tryWebSquareSetValue(objectId, text);
     if (wsHandled) return;
 
-    // 3. Focus the element first
+    // 3. Scroll into view and focus the element
     await this.transport.send('Runtime.callFunctionOn', {
       objectId,
-      functionDeclaration: `function() { this.focus(); }`,
+      functionDeclaration: `function() { this.scrollIntoView({ block: 'center' }); this.focus(); }`,
       returnByValue: true,
     });
 

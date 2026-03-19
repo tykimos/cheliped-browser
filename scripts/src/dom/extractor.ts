@@ -52,10 +52,25 @@ export class DomExtractor {
 
     if (childFrameIds.length === 0) return [];
 
+    // Extract all frames in parallel for better performance
+    const frameResults = await Promise.allSettled(
+      childFrameIds.map(frameId => this.extractSingleFrame(transport, frameId))
+    );
+
+    const results: InternalDomNode[] = [];
+    for (const result of frameResults) {
+      if (result.status === 'fulfilled') {
+        results.push(...result.value);
+      }
+    }
+
+    return results;
+  }
+
+  /** Extract interactive elements from a single iframe. */
+  private async extractSingleFrame(transport: CDPTransport, frameId: string): Promise<InternalDomNode[]> {
     const results: InternalDomNode[] = [];
 
-    for (const frameId of childFrameIds) {
-      try {
         // Create an isolated world for the frame to get an executionContextId
         const worldResult = (await transport.send('Page.createIsolatedWorld', {
           frameId,
@@ -84,7 +99,7 @@ export class DomExtractor {
           awaitPromise: false,
         })) as { result?: { value?: unknown }; exceptionDetails?: unknown };
 
-        if (evalResult.exceptionDetails) continue;
+        if (evalResult.exceptionDetails) return results;
 
         const elements = evalResult.result?.value as Array<{
           tagName: string;
@@ -92,7 +107,7 @@ export class DomExtractor {
           attributes: Record<string, string>;
         }> | undefined;
 
-        if (!elements || !Array.isArray(elements)) continue;
+        if (!elements || !Array.isArray(elements)) return results;
 
         for (const el of elements) {
           const children: InternalDomNode[] = [];
@@ -100,7 +115,7 @@ export class DomExtractor {
           // If the element has text, add a text child node
           if (el.textContent) {
             children.push({
-              backendNodeId: 0,
+              backendNodeId: -1,
               nodeType: 3,
               tagName: '#text',
               attributes: {},
@@ -109,18 +124,17 @@ export class DomExtractor {
             });
           }
 
+          // Use backendNodeId: -1 for iframe elements since they can't be
+          // resolved via CDP DOM commands (no real backendNodeId available).
+          // The semantic extractor will still extract them as text-only elements.
           results.push({
-            backendNodeId: 0,
+            backendNodeId: -1,
             nodeType: 1,
             tagName: el.tagName,
             attributes: el.attributes,
             children,
           });
         }
-      } catch {
-        // Skip frames that are cross-origin or otherwise inaccessible
-      }
-    }
 
     return results;
   }

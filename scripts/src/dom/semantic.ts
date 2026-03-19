@@ -32,7 +32,8 @@ export class SemanticExtractor {
   private deduplicateHeadings(elements: SemanticElement[]): SemanticElement[] {
     const seenHeadingTexts = new Set<string>();
     return elements.filter((el) => {
-      if (!el.tag) return true; // not a heading
+      // Only deduplicate actual text-category headings, not links/buttons that wrap headings
+      if (!el.tag || el.category !== 'text') return true;
       const text = (el.text ?? '').trim();
       if (!text) return false; // drop empty headings
       if (seenHeadingTexts.has(text)) return false; // duplicate

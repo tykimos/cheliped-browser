@@ -22,13 +22,13 @@ export interface AgentDomNode {
 export interface AgentDom {
   url: string;
   title: string;
-  buttons: AgentDomNode[];
-  links: AgentDomNode[];
-  inputs: AgentDomNode[];
-  selects: AgentDomNode[];
-  textareas: AgentDomNode[];
-  forms: AgentDomNode[];
-  texts: AgentDomNode[];
-  images: AgentDomNode[];
+  buttons?: AgentDomNode[];
+  links?: AgentDomNode[];
+  inputs?: AgentDomNode[];
+  selects?: AgentDomNode[];
+  textareas?: AgentDomNode[];
+  forms?: AgentDomNode[];
+  texts?: AgentDomNode[];
+  images?: AgentDomNode[];
   timestamp: number;
 }

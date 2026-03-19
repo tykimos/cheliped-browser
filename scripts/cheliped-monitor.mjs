@@ -103,7 +103,7 @@ function startScreencast(browserWsUrl) {
         const ackMsg = {
           id: ackId,
           method: 'Page.screencastFrameAck',
-          params: { sessionId: params.metadata?.sessionId || 0 },
+          params: { sessionId: params.sessionId || 0 },
         };
         if (msg.sessionId) ackMsg.sessionId = msg.sessionId;
         ws.send(JSON.stringify(ackMsg));

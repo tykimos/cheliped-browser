@@ -7,12 +7,13 @@ export class Page {
   async navigate(url: string, waitStrategy: 'load' | 'networkIdle' = 'load'): Promise<GotoResult> {
     // Track HTTP status from Network.responseReceived
     let httpStatus = 200;
+    let mainFrameId: string | undefined;
     const onResponse = (params: unknown) => {
       const p = params as Record<string, unknown>;
       const response = p.response as Record<string, unknown> | undefined;
       if (response && typeof response.status === 'number') {
-        // Only capture the main frame response (type === 'Document')
-        if (p.type === 'Document' || p.type === undefined) {
+        // Only capture the main frame's final document response (skip redirects)
+        if (p.type === 'Document' && (!mainFrameId || p.frameId === mainFrameId)) {
           httpStatus = response.status;
         }
       }
@@ -20,7 +21,8 @@ export class Page {
     this.transport.on('Network.responseReceived', onResponse);
 
     try {
-      await this.transport.send('Page.navigate', { url });
+      const navResult = await this.transport.send('Page.navigate', { url }) as Record<string, unknown>;
+      mainFrameId = navResult.frameId as string | undefined;
       if (waitStrategy === 'networkIdle') {
         await this.waitForNetworkIdle();
       } else {
@@ -104,12 +106,23 @@ export class Page {
     return this.waitForNetworkIdle(500, timeoutMs);
   }
 
-  async waitForLoad(): Promise<void> {
+  async waitForLoad(timeout: number = 30000): Promise<void> {
     return new Promise((resolve) => {
-      const onLoad = () => {
+      let settled = false;
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         this.transport.off('Page.loadEventFired', onLoad);
+      };
+      const onLoad = () => {
+        cleanup();
         resolve();
       };
+      const timer = setTimeout(() => {
+        cleanup();
+        resolve(); // Don't block on timeout — best effort like waitForNetworkIdle
+      }, timeout);
       this.transport.on('Page.loadEventFired', onLoad);
     });
   }
