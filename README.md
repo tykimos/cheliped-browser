@@ -440,7 +440,55 @@ node scripts/cheliped-cli.mjs '[{"cmd":"<command>","args":["..."]}]'
 | `actions` | — | Auto-detect semantic actions |
 | `perform` | `["actionId"]` | Execute a semantic action |
 | `observe-graph` | — | Get UI graph (nodes + edges) |
+| `setup-downloads` | `["path"]` | Enable file downloads to specified directory |
+| `download` | `["url", "path"]` | Download file by direct URL |
+| `download-click` | `["agentId", "path", "timeout"]` | Click element to trigger download |
+| `download-js` | `["jsExpr", "path", "timeout"]` | Run JS to trigger download |
+| `monitor` | `["port"]` | Start real-time browser viewer (default port 19222) |
+| `monitor-stop` | — | Stop the monitor viewer |
 | `close` | — | Kill Chrome, delete session |
+
+---
+
+## 👁 Real-time Monitor
+
+Watch the agent's browser actions live in a web viewer:
+
+```bash
+# Start the monitor — opens in your default browser
+node scripts/cheliped-cli.mjs '[{"cmd":"monitor"}]'
+
+# Agent continues working — all actions visible in the viewer
+node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"fill","args":["3","hello"]},{"cmd":"click","args":["4"]}]'
+
+# Stop the monitor
+node scripts/cheliped-cli.mjs '[{"cmd":"monitor-stop"}]'
+```
+
+### How it works
+
+The monitor uses CDP [`Page.startScreencast`](https://chromedevtools.github.io/devtools-protocol/tot/Page/#method-startScreencast) to stream JPEG frames from Chrome to a lightweight web viewer via Server-Sent Events (SSE).
+
+```
+Chrome (headless)           Monitor Server (:19222)           Browser Viewer
+    │                              │                               │
+    │◄─ Target.attachToTarget ────│                               │
+    │◄─ Page.startScreencast ─────│                               │
+    │                              │                               │
+    │── screencastFrame (JPEG) ──►│── SSE data: {frame} ────────►│ <img> update
+    │── screencastFrame ─────────►│── SSE data: {frame} ────────►│ <img> update
+    │       ...                    │       ...                      │
+```
+
+**Features:**
+- Dark-themed compact UI with live/disconnected status indicator
+- FPS counter and action bar showing current agent operation
+- Auto-opens in default browser on macOS/Linux/Windows
+- Zero impact on agent performance — uses separate CDP session via `Target.attachToTarget`
+- Auto-closes when Chrome session ends
+
+**Default: off.** Start with `monitor` command when you want to observe the agent's actions.
 
 ---
 
@@ -566,6 +614,32 @@ node scripts/cheliped-cli.mjs '[
   {"cmd":"goto","args":["https://example.com"]},
   {"cmd":"screenshot","args":["/tmp/page.png"]}
 ]'
+```
+
+### Download a File
+
+```bash
+# Direct URL download
+node scripts/cheliped-cli.mjs '[
+  {"cmd":"download","args":["https://example.com/report.pdf","/tmp/downloads"]}
+]'
+
+# Click a download button
+node scripts/cheliped-cli.mjs '[
+  {"cmd":"observe"},
+  {"cmd":"download-click","args":["12","/tmp/downloads","30000"]}
+]'
+```
+
+### Watch the Agent Work (Real-time Monitor)
+
+```bash
+# Start monitor, then run tasks — watch in real-time
+node scripts/cheliped-cli.mjs '[{"cmd":"monitor"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"goto","args":["https://news.ycombinator.com"]},{"cmd":"observe"}]'
+node scripts/cheliped-cli.mjs '[{"cmd":"click","args":["5"]},{"cmd":"observe"}]'
+# Stop when done
+node scripts/cheliped-cli.mjs '[{"cmd":"monitor-stop"}]'
 ```
 
 ### Run Multiple Agents
