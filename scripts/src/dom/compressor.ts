@@ -4,7 +4,8 @@ import type { AgentDom } from '../types/agent-dom.types.js';
 
 const DEFAULTS: Required<CompressionOptions> = {
   enabled: true,
-  maxTextLength: 512,
+  maxTextLength: 200,
+  maxTexts: 80,
   maxListItems: 30,
   maxLinks: 5000,
   maxImages: 10,
@@ -84,6 +85,18 @@ export class TokenCompressor {
       if (el.category === 'image') {
         imageCount++;
         return imageCount <= this.opts.maxImages;
+      }
+      return true;
+    });
+
+    // 5.5. Limit text elements (headings always kept)
+    let textCount = 0;
+    result = result.filter(el => {
+      if (el.category === 'text') {
+        // Always keep headings (h1-h6)
+        if (el.tag && /^h[1-6]$/.test(el.tag)) return true;
+        textCount++;
+        return textCount <= this.opts.maxTexts;
       }
       return true;
     });

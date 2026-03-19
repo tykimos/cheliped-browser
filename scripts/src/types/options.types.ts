@@ -1,6 +1,7 @@
 export interface CompressionOptions {
   enabled?: boolean;
   maxTextLength?: number;
+  maxTexts?: number;
   maxListItems?: number;
   maxLinks?: number;
   maxImages?: number;

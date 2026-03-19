@@ -95,8 +95,21 @@ export class AgentDomBuilder {
     const timing: Record<string, number> = {};
     let t0 = Date.now();
 
-    const rawTree = await this.extractor.extractDomTree(transport, maxDepth);
+    // Parallelize DOM extraction with title/URL retrieval
+    const [rawTree, metaResult] = await Promise.all([
+      this.extractor.extractDomTree(transport, maxDepth),
+      transport.send('Runtime.evaluate', {
+        expression: 'JSON.stringify({t:document.title,u:location.href})',
+        returnByValue: true,
+      }),
+    ]);
     timing.extract = Date.now() - t0;
+
+    const meta = JSON.parse(
+      (metaResult as { result?: { value?: string } })?.result?.value ?? '{"t":"","u":""}'
+    );
+    const titleValue = meta.t ?? '';
+    const urlValue = meta.u ?? '';
 
     t0 = Date.now();
     const filtered = this.domFilter.filter(rawTree);
@@ -113,22 +126,6 @@ export class AgentDomBuilder {
       elements = compressor.compress(elements);
     }
     timing.compress = Date.now() - t0;
-
-    const [titleResult, urlResult] = await Promise.all([
-      transport.send('Runtime.evaluate', {
-        expression: 'document.title',
-        returnByValue: true,
-      }),
-      transport.send('Runtime.evaluate', {
-        expression: 'window.location.href',
-        returnByValue: true,
-      }),
-    ]);
-
-    const titleValue =
-      (titleResult as { result?: { value?: string } })?.result?.value ?? '';
-    const urlValue =
-      (urlResult as { result?: { value?: string } })?.result?.value ?? '';
 
     timing.total = Object.values(timing).reduce((a, b) => a + b, 0);
 
