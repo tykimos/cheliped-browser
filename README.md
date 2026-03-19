@@ -155,14 +155,14 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 
 #### Architecture
 
-| | Cheliped | Tandem Browser | agent-browser | Playwright | Puppeteer |
-|:--|:---------|:---------------|:--------------|:-----------|:----------|
-| **Runtime** | Headless Chrome (spawned) | Electron app (GUI) | Rust binary + Chrome | Node.js + Chromium | Node.js + Chrome |
-| **Protocol** | Direct CDP WebSocket | Electron DevTools → CDP | Direct CDP | CDP via abstraction | CDP via abstraction |
-| **API style** | CLI / JS library | HTTP REST API (127.0.0.1:8765) | CLI commands | JS library | JS library |
-| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | CDP `Accessibility.getFullAXTree()` → compact filter → `@ref` labels | CDP AXTree | `ariaSnapshot()` | `accessibility.snapshot()` |
-| **Human-in-the-loop** | No | Yes (Wingman panel, captcha detection) | No | No | No |
-| **Security** | Domain allowlist + prompt guard | 6-layer (network, JS AST, behavior) | None | None | None |
+| | Cheliped | Tandem Browser | agent-browser | Playwright | Puppeteer | OpenClaw Browser |
+|:--|:---------|:---------------|:--------------|:-----------|:----------|:-----------------|
+| **Runtime** | Headless Chrome (spawned) | Electron app (GUI) | Rust binary + Chrome | Node.js + Chromium | Node.js + Chrome | Playwright over Chrome |
+| **Protocol** | Direct CDP WebSocket | Electron DevTools → CDP | Direct CDP | CDP via abstraction | CDP via abstraction | Playwright over CDP |
+| **API style** | CLI / JS library | HTTP REST API (127.0.0.1:8765) | CLI commands | JS library | JS library | HTTP REST API via gateway |
+| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | CDP `Accessibility.getFullAXTree()` → compact filter → `@ref` labels | CDP AXTree | `ariaSnapshot()` | `accessibility.snapshot()` | Playwright `ariaSnapshot()` / `_snapshotForAI()` |
+| **Human-in-the-loop** | No | Yes (Wingman panel, captcha detection) | No | No | No | No |
+| **Security** | Domain allowlist + prompt guard | 6-layer (network, JS AST, behavior) | None | None | None | None |
 
 #### Output Format
 
@@ -173,6 +173,14 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
   "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
   "buttons": [], "inputs": []
 }
+```
+
+**OpenClaw (AI Snapshot)** — YAML-like accessibility tree with ref tokens:
+```yaml
+- heading "Example Domain" [level=1] [ref=e3]
+- paragraph: This domain is for use in documentation examples...
+- link "Learn more" [ref=e6] [cursor=pointer]:
+  - /url: https://iana.org/domains/example
 ```
 
 **Tandem (AXTree Snapshot)** — Indented accessibility tree with `@ref` labels:
@@ -200,18 +208,22 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 
 #### Feature Comparison
 
-| Feature | Cheliped | Tandem | agent-browser | Playwright | Puppeteer |
-|:--------|:---------|:-------|:--------------|:-----------|:----------|
-| **Element IDs** | Numeric `agentId` | `@ref` (`@e1`) | None | CSS selectors | CSS selectors |
-| **Click/Fill** | By agentId | By @ref | N/A | By locator | By selector |
-| **Human typing** | `fillHuman()` | BehaviorReplay | N/A | N/A | N/A |
-| **Content extraction** | Semantic DOM pipeline | Structured by page type | Raw text | A11y tree | A11y tree |
-| **Captcha detection** | No | Auto-detect + show | No | No | No |
-| **Stealth patches** | No | Yes | No | No | No |
-| **Session isolation** | User data dir | X-Session + partition | No | Browser context | Browser context |
-| **Multi-tab** | No | Yes (250+ endpoints) | No | Yes | Yes |
-| **Messenger integration** | No | Telegram, Slack, etc. | No | No | No |
-| **Persistent panels** | No | Bookmarks, Workspaces | No | No | No |
+| Feature | Cheliped | Tandem | agent-browser | Playwright | Puppeteer | OpenClaw |
+|:--------|:---------|:-------|:--------------|:-----------|:----------|:---------|
+| **Element IDs** | Numeric `agentId` | `@ref` (`@e1`) | None | CSS selectors | CSS selectors | Symbolic `[ref=eN]` |
+| **Click/Fill** | By agentId | By @ref | N/A | By locator | By selector | By ref |
+| **Human typing** | `fillHuman()` | BehaviorReplay | N/A | N/A | N/A | N/A |
+| **Enterprise framework** | WebSquare auto-detect | No | No | No | No | No |
+| **Korean IME** | `Input.insertText` | Unknown | No | `type()` | `type()` | No |
+| **Content extraction** | Semantic DOM pipeline | Structured by page type | Raw text | A11y tree | A11y tree | YAML a11y tree |
+| **Captcha detection** | No | Auto-detect + show | No | No | No | No |
+| **Stealth patches** | No | Yes | No | No | No | No |
+| **Session isolation** | User data dir | X-Session + partition | No | Browser context | Browser context | Playwright context |
+| **Multi-tab** | No | Yes (250+ endpoints) | No | Yes | Yes | Yes |
+| **Dialog handling** | No | No | No | Yes | Yes | Yes |
+| **File upload** | No | No | No | Yes | Yes | Yes |
+| **Cookie CRUD** | No | No | No | Yes | Yes | Yes |
+| **JS evaluate** | `runJs()` | `/execute-js` | No | `page.evaluate()` | `page.evaluate()` | Scoped evaluate |
 
 #### When to Use Which
 
@@ -285,6 +297,9 @@ OpenClaw's internal browser runs as an HTTP gateway service (not a standalone li
 - **Smart link deduplication** — keeps best text per URL, reduces noise on link-heavy pages
 - **Fast extract() path** — `extract('text')` and `extract('links')` use lightweight JS evaluation, bypassing the full DOM pipeline (14ms vs 1,100ms+ on heavy pages)
 - **React/SPA fill** — native input value setters bypass synthetic event systems
+- **WebSquare/enterprise framework support** — auto-detects WebSquare and uses native `setValue()` API to update both DOM and framework internal state. Tested on g2b.go.kr (Korean government procurement)
+- **Korean IME input** — `Input.insertText` handles Korean composition correctly, unlike `dispatchKeyEvent`
+- **CSS selector commands** — `fill-selector`, `click-selector`, `focus-selector`, `type`, `press-key` for direct element interaction without agentId
 - **Session persistence** — Chrome stays alive between agent invocations, no restart overhead
 - **Concurrent sessions** — multiple agents browse independently with `--session`
 
@@ -379,6 +394,9 @@ Most browser tools give LLMs raw accessibility trees or HTML snapshots. Cheliped
 ### How Cheliped Handles What Others Can't
 
 - **Input fields**: Cheliped uses native `HTMLInputElement.value` setters via CDP `Runtime.callFunctionOn`, bypassing React/Vue synthetic event systems. Playwright/Puppeteer type character-by-character, which can conflict with SPA input handlers.
+- **WebSquare auto-detection**: Enterprise Korean web frameworks like WebSquare maintain their own internal state model separate from the DOM. Setting `element.value` via DOM doesn't update the framework's state, causing form submissions to fail. Cheliped automatically detects WebSquare on the page (`window.WebSquare`) and calls `comp.setValue()` via the framework's native API — no user intervention needed. All `fill` variants (by agentId, by selector, human-like typing) try WebSquare first, then fall back to DOM methods. This also works as a pattern for other enterprise frameworks with similar widget APIs.
+- **Korean IME support**: Text input uses CDP `Input.insertText` instead of `Input.dispatchKeyEvent`, ensuring proper handling of Korean composition (IME) and Unicode characters.
+- **CSS selector commands**: `fill-selector`, `click-selector`, and `focus-selector` bypass agentId for direct element targeting. Combined with `type` (character-by-character into focused element) and `press-key` (Enter, Tab, etc.), these enable interaction with any framework widget.
 - **Click reliability**: Primary click via CDP `Input.dispatchMouseEvent`, with fallback via `DOM.resolveNode` + `Runtime.callFunctionOn` for elements in complex layouts. No CSS selector construction needed.
 - **Same-origin iframes**: Extracts content via `Page.getFrameTree` → `Page.createIsolatedWorld` → `Runtime.evaluate`, merging child frame elements into the main Agent DOM. Other tools require separate frame handling.
 - **Link deduplication**: Two-pass algorithm — first finds the best (longest) text for each unique URL, then keeps only the first positional occurrence. Reduces noise on navigation-heavy pages.
@@ -408,7 +426,14 @@ node scripts/cheliped-cli.mjs '[{"cmd":"<command>","args":["..."]}]'
 | `goto` | `["url"]` | Navigate to URL, wait for load |
 | `observe` | — | Extract Agent DOM with agentIds |
 | `click` | `["agentId"]` | Click an element |
-| `fill` | `["agentId", "text"]` | Type into an input field |
+| `fill` | `["agentId", "text"]` | Type into an input field (auto-detects WebSquare) |
+| `fill-human` | `["agentId", "text"]` | Human-like char-by-char typing (auto-detects WebSquare) |
+| `fill-selector` | `["cssSelector", "text"]` | Fill by CSS selector, bypasses agentId (auto-detects WebSquare) |
+| `click-selector` | `["cssSelector"]` | Click by CSS selector, bypasses agentId |
+| `focus-selector` | `["cssSelector"]` | Focus element by CSS selector (CDP `DOM.focus`) |
+| `type` | `["text"]` | Type into currently focused element (IME-compatible) |
+| `press-key` | `["keyName"]` | Press special key: Enter, Tab, Backspace, Escape, arrows |
+| `select` | `["agentId", "value"]` | Select option from `<select>` by text or value |
 | `screenshot` | `["path"]` | Capture page as PNG |
 | `run-js` | `["expr"]` | Execute JS in page context |
 | `extract` | `["text"∣"links"∣"all"]` | Pull structured data (text/links use fast path) |
@@ -645,87 +670,87 @@ Raw DOM Tree
 
 #### Text Recall (% of visible text fragments recognized)
 
-| Site | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|--------:|--------------:|-----------:|----------:|
-| Hacker News | 90.0% | 90.0% | 90.0% | 90.0% |
-| Wikipedia | 83.0% | **95.0%** | 90.0% | 90.0% |
-| GitHub | **37.0%** | 12.0% | 12.0% | 8.5% |
-| Example.com | **100.0%** | **100.0%** | **100.0%** | **100.0%** |
-| React (SPA) | 91.3% | **100.0%** | **100.0%** | **100.0%** |
-| MDN Web Docs | **90.5%** | 68.5% | 68.5% | 68.0% |
-| **Average** | **82.0%** | 77.6% | 76.8% | 76.1% |
+| Site | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-----|--------:|--------------:|-----------:|----------:|-------:|
+| Hacker News | 90.5% | 90.5% | 90.5% | 90.5% | 90.5% |
+| Wikipedia | 92.5% | **95.0%** | 90.0% | 90.0% | 90.0% |
+| GitHub | **37.0%** | 12.0% | 12.0% | 9.5% | 9.5% |
+| Example.com | **100.0%** | **100.0%** | **100.0%** | **100.0%** | **100.0%** |
+| React (SPA) | 95.7% | **100.0%** | **100.0%** | **100.0%** | **100.0%** |
+| MDN Web Docs | **93.5%** | 69.0% | 69.0% | 68.5% | 68.5% |
+| **Average** | **84.9%** | 77.8% | 76.9% | 76.4% | 76.4% |
 
-> Cheliped leads overall with 82.0% avg. Text deduplication removes redundant elements from nested containers while preserving unique content.
+> Cheliped leads overall with 84.9% avg. Text deduplication removes redundant elements from nested containers while preserving unique content.
 > All tools struggle with GitHub — dynamic rendering hides content from all extraction methods.
 
 #### Link Detection
 
-| Site | | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|:--|--------:|--------------:|-----------:|----------:|
-| Hacker News | Recall | **100%** | **100%** | 98% | **100%** |
-| | Precision | **100%** | **100%** | 88% | 87% |
-| Wikipedia | Recall | 84% | 84% | 84% | 84% |
-| | Precision | 84% | **95%** | **95%** | **95%** |
-| GitHub | Recall | **100%** | 87% | 87% | 82% |
-| | Precision | 34% | **51%** | **51%** | 49% |
-| Example.com | Recall | **100%** | **100%** | **100%** | **100%** |
-| | Precision | **100%** | **100%** | **100%** | **100%** |
-| React (SPA) | Recall | **100%** | **100%** | **100%** | **100%** |
-| | Precision | **100%** | **100%** | **100%** | **100%** |
-| MDN Web Docs | Recall | **100%** | 46% | 46% | 46% |
-| | Precision | **96%** | **100%** | **100%** | **100%** |
-| **Average** | **Recall** | **97.3%** | 86.1% | 85.8% | 85.4% |
-| | **Precision** | 85.6% | **90.9%** | 88.9% | 88.5% |
+| Site | | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-----|:--|--------:|--------------:|-----------:|----------:|-------:|
+| Hacker News | Recall | **100%** | **100%** | 98% | **100%** | **100%** |
+| | Precision | **100%** | **100%** | 88% | 87% | 87% |
+| Wikipedia | Recall | 84% | 84% | 84% | 84% | 84% |
+| | Precision | 84% | **95%** | **95%** | **95%** | **95%** |
+| GitHub | Recall | **100%** | 87% | 84% | 80% | 80% |
+| | Precision | 34% | 51% | 49% | 48% | 48% |
+| Example.com | Recall | **100%** | **100%** | **100%** | **100%** | **100%** |
+| | Precision | **100%** | **100%** | **100%** | **100%** | **100%** |
+| React (SPA) | Recall | **100%** | **100%** | **100%** | **100%** | **100%** |
+| | Precision | **100%** | **100%** | **100%** | **100%** | **100%** |
+| MDN Web Docs | Recall | **100%** | 46% | 46% | 46% | 46% |
+| | Precision | **96%** | **100%** | **100%** | **100%** | **100%** |
+| **Average** | **Recall** | **97.3%** | 86.1% | 85.5% | 85.0% | 85.0% |
+| | **Precision** | 85.6% | **90.9%** | 88.7% | 88.3% | 88.3% |
 
 > Cheliped finds the most links (97.3% recall) but has lower precision on GitHub due to over-detection from expanded link extraction.
 
 #### Button Detection (found / ground-truth buttons)
 
-| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|:-----------:|--------:|--------------:|-----------:|----------:|
-| Wikipedia | 22 | **21** (95%) | 21 (95%) | 8 (36%) | 3 (14%) |
-| GitHub | 12 | **11** (92%) | 7 (58%) | 7 (58%) | 2 (17%) |
-| MDN Web Docs | 8 | **8** (100%) | **8** (100%) | **8** (100%) | 0 (0%) |
-| **Average** | | **97.9%** | 92.3% | 82.4% | 55.1% |
+| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-----|:-----------:|--------:|--------------:|-----------:|----------:|-------:|
+| Wikipedia | 22 | **21** (95%) | 21 (95%) | 8 (36%) | 3 (14%) | 3 (14%) |
+| GitHub | 12 | **11** (92%) | 7 (58%) | 7 (58%) | 2 (17%) | 2 (17%) |
+| MDN Web Docs | 8 | **8** (100%) | **8** (100%) | **8** (100%) | 0 (0%) | 0 (0%) |
+| **Average** | | **97.9%** | 92.3% | 82.4% | 55.1% | 55.1% |
 
-> Cheliped detects nearly all buttons. Puppeteer misses most — its a11y tree often classifies buttons differently.
+> Cheliped detects nearly all buttons. Puppeteer and Tandem miss most — their a11y trees often classify buttons differently.
 
 #### Input Field Detection (found / ground-truth inputs)
 
-| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|:-----------:|--------:|--------------:|-----------:|----------:|
-| Hacker News | 1 | **1** (100%) | 0 (0%) | 0 (0%) | 0 (0%) |
-| Wikipedia | 14 | **11** (79%) | 1 (7%) | 0 (0%) | 0 (0%) |
-| React (SPA) | 1 | **1** (100%) | 0 (0%) | 0 (0%) | **1** (100%) |
-| **Average** | | **79.8%** | 1.2% | 33.3% | 50.0% |
+| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-----|:-----------:|--------:|--------------:|-----------:|----------:|-------:|
+| Hacker News | 1 | **1** (100%) | 0 (0%) | 0 (0%) | 0 (0%) | 0 (0%) |
+| Wikipedia | 14 | **11** (79%) | 1 (7%) | 0 (0%) | 0 (0%) | 0 (0%) |
+| React (SPA) | 1 | **1** (100%) | 0 (0%) | 0 (0%) | **1** (100%) | **1** (100%) |
+| **Average** | | **79.8%** | 1.2% | 33.3% | 50.0% | 50.0% |
 
 > Cheliped detects the most real input fields overall (79.8%). Wikipedia improved from 1/14 to 11/14 with filter optimizations.
 > agent-browser detects 482–1,407 "inputs" per page (false positives from its text format) but matches only 1.2% of real ones.
 
 #### Heading Detection (found / ground-truth headings)
 
-| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-----|:-----------:|--------:|--------------:|-----------:|----------:|
-| Wikipedia | 12 | 11 (92%) | **12** (100%) | **12** (100%) | 11 (92%) |
-| GitHub | 14 | **8** (57%) | 4 (29%) | 4 (29%) | 4 (29%) |
-| Example.com | 1 | **1** (100%) | **1** (100%) | **1** (100%) | **1** (100%) |
-| React (SPA) | 2 | **2** (100%) | **2** (100%) | **2** (100%) | **2** (100%) |
-| MDN Web Docs | 10 | **10** (100%) | **10** (100%) | 9 (90%) | **10** (100%) |
-| **Average** | | **91.5%** | 88.1% | 86.4% | 86.7% |
+| Site | Ground Truth | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-----|:-----------:|--------:|--------------:|-----------:|----------:|-------:|
+| Wikipedia | 12 | 11 (92%) | **12** (100%) | **12** (100%) | 11 (92%) | 11 (92%) |
+| GitHub | 14 | **8** (57%) | 4 (29%) | 4 (29%) | 4 (29%) | 4 (29%) |
+| Example.com | 1 | **1** (100%) | **1** (100%) | **1** (100%) | **1** (100%) | **1** (100%) |
+| React (SPA) | 2 | **2** (100%) | **2** (100%) | **2** (100%) | **2** (100%) | **2** (100%) |
+| MDN Web Docs | 10 | **10** (100%) | **10** (100%) | 9 (90%) | **10** (100%) | **10** (100%) |
+| **Average** | | **91.5%** | 88.1% | 86.4% | 86.7% | 86.7% |
 
 > Cheliped leads heading detection (91.5%). Text deduplication preserves all headings while removing redundant text elements.
 
 #### Overall Quality Score
 
-| Metric | Weight | Cheliped | agent-browser | Playwright | Puppeteer |
-|:-------|------:|---------:|--------------:|-----------:|----------:|
-| Text Recall | 25% | **82.0%** | 77.6% | 76.8% | 76.1% |
-| Link Recall | 20% | **97.3%** | 86.1% | 85.8% | 85.4% |
-| Link Precision | 10% | 85.6% | **90.9%** | 88.9% | 88.5% |
-| Button Recall | 15% | **97.9%** | 92.3% | 82.4% | 55.1% |
-| Input Recall | 15% | **79.8%** | 1.2% | 33.3% | 50.0% |
-| Heading Recall | 15% | **91.5%** | 88.1% | 86.4% | 86.7% |
-| **Overall** | **100%** | **88.9%** | **72.9%** | **75.6%** | **73.7%** |
+| Metric | Weight | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
+|:-------|------:|---------:|--------------:|-----------:|----------:|-------:|
+| Text Recall | 25% | **82.0%** | 77.6% | 76.8% | 76.1% | 76.4% |
+| Link Recall | 20% | **97.3%** | 86.1% | 85.8% | 85.4% | 85.0% |
+| Link Precision | 10% | 85.6% | **90.9%** | 88.9% | 88.5% | 88.3% |
+| Button Recall | 15% | **97.9%** | 92.3% | 82.4% | 55.1% | 55.1% |
+| Input Recall | 15% | **79.8%** | 1.2% | 33.3% | 50.0% | 50.0% |
+| Heading Recall | 15% | **91.5%** | 88.1% | 86.4% | 86.7% | 86.7% |
+| **Overall** | **100%** | **88.9%** | **72.9%** | **75.6%** | **73.7%** | **73.7%** |
 
 ### Edge Case & Limitation Test
 
@@ -733,18 +758,18 @@ Raw DOM Tree
 
 #### Navigation & Extraction
 
-| Site | Category | Cheliped | Playwright | Puppeteer | Notes |
-|:-----|:---------|--------:|----------:|----------:|:------|
-| NPM Search | Long List | 3,771 tok / 30ms | 133 tok / 163ms | 44 tok / 61ms | Cheliped extracts post-render content (106 links); others see pre-render |
-| Reddit | Long List | 8,392 tok / 36ms | 65 tok / 43ms | 223 tok / 49ms | Similar: Cheliped renders fully, outputs more |
-| YouTube | Heavy SPA | 442 tok / 876ms | 34 tok / 74ms | 1,692 tok / 28ms | All limited by consent/auth wall |
-| Twitter/X | Heavy SPA | 208 tok / 27ms | 20 tok / 885ms | 67 tok / 408ms | Login wall — all tools see minimal content |
-| Google Search | Forms | 627 tok / 65ms | 350 tok / 58ms | 898 tok / 23ms | Cheliped finds 7 inputs vs GT 1 (hidden inputs exposed) |
-| Stack Overflow | Forms | 186 tok / 26ms | 143 tok / 93ms | 44 tok / 33ms | Login required — Cheliped extracts nav elements |
-| MDN API | Complex | 20,365 tok / 93ms | 45,601 tok / 330ms | 116,440 tok / 389ms | 1,230 links, Cheliped dedup caps at ~500 |
-| W3Schools | Complex | 11,317 tok / 98ms | 5,763 tok / 196ms | 20,414 tok / 159ms | Cheliped headings 44 vs 29 GT (slight over-detect) |
-| JSONPlaceholder | Minimal | 1,357 tok / 13ms | 1,360 tok / 52ms | 3,980 tok / 16ms | Near-identical with Playwright |
-| HTTPBin | Minimal | 249 tok / 8ms | 175 tok / 31ms | 833 tok / 8ms | Swagger UI in cross-origin iframe — all tools miss buttons/inputs |
+| Site | Category | Cheliped | Playwright | Puppeteer | Tandem | Notes |
+|:-----|:---------|--------:|----------:|----------:|-------:|:------|
+| NPM Search | Long List | 3,935 tok / 9ms | 2 tok / 24ms | 44 tok / 24ms | 10 tok / 18ms | Cheliped extracts post-render content (112 links); others see pre-render |
+| Reddit | Long List | 8,575 tok / 14ms | 65 tok / 20ms | 223 tok / 35ms | 142 tok / 42ms | Similar: Cheliped renders fully, outputs more |
+| YouTube | Heavy SPA | 561 tok / 45ms | 34 tok / 37ms | 1,685 tok / 11ms | 162 tok / 7ms | All limited by consent/auth wall |
+| Twitter/X | Heavy SPA | 72 tok / 5ms | 22 tok / 279ms | 67 tok / 41ms | 32 tok / 50ms | Login wall — all tools see minimal content |
+| Google Search | Forms | 627 tok / 12ms | 350 tok / 33ms | 898 tok / 12ms | 480 tok / 24ms | Cheliped finds 7 inputs vs GT 1 (hidden inputs exposed) |
+| Stack Overflow | Forms | 1,623 tok / 16ms | 2 tok / 16ms | 44 tok / 17ms | 10 tok / 18ms | Login required — Cheliped extracts nav elements |
+| MDN API | Complex | 20,428 tok / 54ms | 45,601 tok / 121ms | 116,440 tok / 194ms | 86,600 tok / 200ms | 1,230 links, Cheliped dedup caps at ~500 |
+| W3Schools | Complex | 11,325 tok / 32ms | 5,763 tok / 32ms | 20,414 tok / 29ms | 13,003 tok / 22ms | Cheliped headings 44 vs 29 GT (slight over-detect) |
+| JSONPlaceholder | Minimal | 1,356 tok / 3ms | 1,360 tok / 19ms | 3,980 tok / 7ms | 2,502 tok / 5ms | Near-identical with Playwright |
+| HTTPBin | Minimal | 249 tok / 2ms | 175 tok / 13ms | 833 tok / 2ms | 563 tok / 5ms | Swagger UI in cross-origin iframe — all tools miss buttons/inputs |
 
 #### Element Detection Accuracy (Cheliped vs Ground Truth)
 
@@ -776,22 +801,22 @@ Raw DOM Tree
 
 #### Token Output & Observe Speed
 
-| Site | Category | Cheliped | Playwright | Puppeteer |
-|:-----|:---------|--------:|----------:|----------:|
-| Amazon | E-commerce | 64,115 tok / 242ms | 34,395 tok / 294ms | 34,956 tok / 203ms |
-| eBay | E-commerce | 32,077 tok / 268ms | 77 tok / 23ms | 65,215 tok / 196ms |
-| CNN | News Portal | 12,478 tok / 290ms | 14,673 tok / 221ms | 25,187 tok / 176ms |
-| BBC | News Portal | 4,226 tok / 47ms | 8,415 tok / 412ms | 20,089 tok / 222ms |
-| GitHub Issues | Web App | 9,448 tok / 135ms | 2,904 tok / 131ms | 11,016 tok / 118ms |
-| GitLab Explore | Web App | 906 tok / 36ms | 440 tok / 88ms | 1,440 tok / 42ms |
-| HN Comment Thread | Deep Nesting | 817 tok / 11ms | 1,041 tok / 31ms | 1,881 tok / 9ms |
-| Wikipedia (Long) | Deep Nesting | 16,893 tok / 119ms | 21,198 tok / 77ms | 66,468 tok / 129ms |
-| Booking.com | Complex Form | 61 tok / 11ms | 0 tok / 28ms | 33 tok / 25ms |
-| Zillow | Complex Form | 9,680 tok / 363ms | ❌ | 32 tok / 25ms |
-| Naver | International | 4,172 tok / 965ms | 152 tok / 44ms | 774 tok / 40ms |
-| Baidu | International | 2,448 tok / 667ms | 1,103 tok / 37ms | 2,021 tok / 22ms |
-| Rust Docs | Documentation | 12,477 tok / 41ms | 11,958 tok / 104ms | 33,673 tok / 99ms |
-| React Docs | Documentation | 2,260 tok / 95ms | 2,829 tok / 161ms | 5,137 tok / 59ms |
+| Site | Category | Cheliped | Playwright | Puppeteer | Tandem |
+|:-----|:---------|--------:|----------:|----------:|-------:|
+| Amazon | E-commerce | 57,079 tok / 131ms | 34,288 tok / 129ms | 34,886 tok / 94ms | 19,464 tok / 79ms |
+| eBay | E-commerce | 33,615 tok / 117ms | 77 tok / 13ms | 352 tok / 4ms | 172 tok / 3ms |
+| CNN | News Portal | 11,302 tok / 258ms | 16,017 tok / 70ms | 27,177 tok / 71ms | 29,711 tok / 61ms |
+| BBC | News Portal | 3,988 tok / 69ms | 8,397 tok / 198ms | 19,987 tok / 88ms | 17,970 tok / 102ms |
+| GitHub Issues | Web App | 9,465 tok / 74ms | 3,017 tok / 187ms | 11,386 tok / 203ms | 11,750 tok / 186ms |
+| GitLab Explore | Web App | 905 tok / 6ms | 440 tok / 47ms | 1,440 tok / 23ms | 1,021 tok / 28ms |
+| HN Comment Thread | Deep Nesting | 817 tok / 4ms | 1,041 tok / 14ms | 1,881 tok / 4ms | 1,368 tok / 5ms |
+| Wikipedia (Long) | Deep Nesting | 17,051 tok / 34ms | 21,198 tok / 46ms | 66,468 tok / 58ms | 49,859 tok / 54ms |
+| Booking.com | Complex Form | 60 tok / 4ms | 0 tok / 14ms | 33 tok / 2ms | 0 tok / 13ms |
+| Zillow | Complex Form | 11,108 tok / 18ms | ❌ | 32 tok / 4ms | 15 tok / 10ms |
+| Naver | International | 5,430 tok / 433ms | 152 tok / 21ms | 774 tok / 8ms | 354 tok / 15ms |
+| Baidu | International | 2,459 tok / 29ms | 1,121 tok / 15ms | 2,183 tok / 21ms | 1,371 tok / 6ms |
+| Rust Docs | Documentation | 12,564 tok / 12ms | 11,958 tok / 41ms | 33,673 tok / 61ms | 21,154 tok / 39ms |
+| React Docs | Documentation | 2,314 tok / 8ms | 2,829 tok / 43ms | 5,137 tok / 19ms | 3,877 tok / 25ms |
 
 #### Fast Extract vs Full Observe (Cheliped only)
 

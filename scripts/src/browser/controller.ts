@@ -6,12 +6,77 @@ import { Page } from './page.js';
 
 export class BrowserController {
   private page: Page;
+  private _webSquareDetected: boolean | null = null;
 
   constructor(private transport: CDPTransport) {
     this.page = new Page(transport);
   }
 
+  /**
+   * Detect whether the current page uses WebSquare framework.
+   * Result is cached per page navigation.
+   */
+  private async detectWebSquare(): Promise<boolean> {
+    if (this._webSquareDetected !== null) return this._webSquareDetected;
+    try {
+      const result = await this.transport.send('Runtime.evaluate', {
+        expression: `typeof window.WebSquare !== 'undefined' && typeof WebSquare.util?.getComponentById === 'function'`,
+        returnByValue: true,
+      }) as Record<string, unknown>;
+      const r = result.result as Record<string, unknown>;
+      this._webSquareDetected = r?.value === true;
+    } catch {
+      this._webSquareDetected = false;
+    }
+    return this._webSquareDetected;
+  }
+
+  /** Reset WebSquare detection cache (called on navigation). */
+  resetFrameworkCache(): void {
+    this._webSquareDetected = null;
+  }
+
+  /**
+   * Try to set value via WebSquare component API.
+   * Finds the component by element id or parent id, then calls setValue().
+   * Returns true if successful, false if WebSquare is not available or component not found.
+   */
+  private async tryWebSquareSetValue(objectId: string, text: string): Promise<boolean> {
+    const isWS = await this.detectWebSquare();
+    if (!isWS) return false;
+
+    try {
+      const result = await this.transport.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function(text) {
+          var el = this;
+          var id = el.id;
+          var parentId = el.parentElement ? el.parentElement.id : '';
+
+          // Try finding WebSquare component by element id, then parent id
+          var comp = null;
+          try { comp = WebSquare.util.getComponentById(id); } catch(e) {}
+          if (!comp || typeof comp.setValue !== 'function') {
+            comp = null;
+            try { comp = WebSquare.util.getComponentById(parentId); } catch(e) {}
+          }
+          if (!comp || typeof comp.setValue !== 'function') return false;
+
+          comp.setValue(text);
+          return true;
+        }`,
+        arguments: [{ value: text }],
+        returnByValue: true,
+      }) as Record<string, unknown>;
+      const r = result.result as Record<string, unknown>;
+      return r?.value === true;
+    } catch {
+      return false;
+    }
+  }
+
   async goto(url: string, waitStrategy?: 'load' | 'networkIdle'): Promise<GotoResult> {
+    this.resetFrameworkCache();
     return this.page.navigate(url, waitStrategy);
   }
 
@@ -108,12 +173,268 @@ export class BrowserController {
     });
   }
 
+  /**
+   * Resolve a CSS selector to a backendNodeId via CDP.
+   * Works with any framework — addresses elements directly by selector.
+   */
+  private async resolveSelector(selector: string): Promise<number> {
+    const docResult = await this.transport.send('DOM.getDocument', {
+      depth: 0,
+    }) as Record<string, unknown>;
+    const root = docResult.root as Record<string, unknown>;
+    const rootNodeId = root.nodeId as number;
+
+    const queryResult = await this.transport.send('DOM.querySelector', {
+      nodeId: rootNodeId,
+      selector,
+    }) as Record<string, unknown>;
+
+    const nodeId = queryResult.nodeId as number;
+    if (!nodeId) {
+      throw new Error(`Element not found for selector: ${selector}`);
+    }
+
+    const describeResult = await this.transport.send('DOM.describeNode', {
+      nodeId,
+    }) as Record<string, unknown>;
+    const node = describeResult.node as Record<string, unknown>;
+    return node.backendNodeId as number;
+  }
+
+  /**
+   * Fill an element by CSS selector using human-like character-by-character typing.
+   * Bypasses agentId — works with WebSquare, custom widgets, etc.
+   * Uses DOM.focus + Input.insertText for maximum compatibility.
+   */
+  async fillBySelector(selector: string, text: string): Promise<void> {
+    const backendNodeId = await this.resolveSelector(selector);
+
+    // 1. Resolve to RemoteObject
+    const resolveResult = await this.transport.send('DOM.resolveNode', {
+      backendNodeId,
+    }) as Record<string, unknown>;
+    const remoteObject = resolveResult.object as Record<string, unknown>;
+    const objectId = remoteObject.objectId as string;
+
+    // 2. Try WebSquare setValue first (handles internal state model)
+    const wsHandled = await this.tryWebSquareSetValue(objectId, text);
+    if (wsHandled) return;
+
+    // 3. Clear existing value via JS
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        this.scrollIntoView({ block: 'center' });
+        if ('value' in this) this.value = '';
+      }`,
+      returnByValue: true,
+    });
+
+    // 4. Focus using CDP DOM.focus (browser-level, survives framework event handling)
+    await this.transport.send('DOM.focus', {
+      backendNodeId,
+    });
+
+    // 5. Click to activate (some frameworks need this)
+    try {
+      const boxResult = await this.transport.send('DOM.getBoxModel', {
+        backendNodeId,
+      }) as Record<string, unknown>;
+      const model = boxResult.model as Record<string, unknown>;
+      const content = model.content as number[];
+      const x = (content[0] + content[2] + content[4] + content[6]) / 4;
+      const y = (content[1] + content[3] + content[5] + content[7]) / 4;
+      await this._dispatchClick(x, y);
+    } catch {
+      // fallback: just use focus
+    }
+
+    // 6. Re-focus after click (click might shift focus)
+    await this.transport.send('DOM.focus', {
+      backendNodeId,
+    });
+
+    // 7. Type character by character using Input.insertText (IME-compatible)
+    for (const char of text) {
+      await this.transport.send('Input.insertText', {
+        text: char,
+      });
+
+      const delay = 50 + Math.floor(Math.random() * 100);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+
+    // 8. Dispatch input/change events for framework reactivity
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        this.dispatchEvent(new Event('input', { bubbles: true }));
+        this.dispatchEvent(new Event('change', { bubbles: true }));
+      }`,
+      returnByValue: true,
+    });
+  }
+
+  /**
+   * Click an element by CSS selector with robust fallback.
+   * Bypasses agentId — works with WebSquare, custom widgets, etc.
+   */
+  async clickBySelector(selector: string): Promise<void> {
+    const backendNodeId = await this.resolveSelector(selector);
+    await this.clickByBackendNodeId(backendNodeId);
+  }
+
+  /**
+   * Focus an element by CSS selector.
+   * Uses CDP DOM.focus for reliable browser-level focusing.
+   * Useful before type() to direct keyboard input to a specific element.
+   */
+  async focusBySelector(selector: string): Promise<void> {
+    const backendNodeId = await this.resolveSelector(selector);
+
+    // Scroll into view first
+    const resolveResult = await this.transport.send('DOM.resolveNode', {
+      backendNodeId,
+    }) as Record<string, unknown>;
+    const remoteObject = resolveResult.object as Record<string, unknown>;
+    const objectId = remoteObject.objectId as string;
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() { this.scrollIntoView({ block: 'center' }); }`,
+      returnByValue: true,
+    });
+
+    // Use CDP DOM.focus for reliable browser-level focus
+    await this.transport.send('DOM.focus', {
+      backendNodeId,
+    });
+  }
+
+  /**
+   * Type text character-by-character into the currently focused element via CDP.
+   * No element targeting — works with whatever has focus.
+   * Framework-agnostic: WebSquare, React, Angular, vanilla — all receive real keyboard events.
+   *
+   * Uses Input.insertText for reliable text insertion (handles Korean IME, Unicode, etc.)
+   * combined with Input.dispatchKeyEvent for proper event triggering.
+   */
+  async type(text: string): Promise<void> {
+    for (const char of text) {
+      // Use insertText for reliable character insertion (IME-compatible)
+      await this.transport.send('Input.insertText', {
+        text: char,
+      });
+
+      // Human-like delay: 30–100ms
+      const delay = 30 + Math.floor(Math.random() * 70);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  /**
+   * Press a special key (Enter, Tab, Backspace, Escape, etc.).
+   * Sends keyDown + keyUp via CDP Input.dispatchKeyEvent.
+   */
+  async pressKey(key: string): Promise<void> {
+    const keyMap: Record<string, { key: string; code: string; text?: string }> = {
+      'enter':     { key: 'Enter', code: 'Enter', text: '\r' },
+      'tab':       { key: 'Tab', code: 'Tab' },
+      'backspace': { key: 'Backspace', code: 'Backspace' },
+      'delete':    { key: 'Delete', code: 'Delete' },
+      'escape':    { key: 'Escape', code: 'Escape' },
+      'arrowup':   { key: 'ArrowUp', code: 'ArrowUp' },
+      'arrowdown': { key: 'ArrowDown', code: 'ArrowDown' },
+      'arrowleft': { key: 'ArrowLeft', code: 'ArrowLeft' },
+      'arrowright':{ key: 'ArrowRight', code: 'ArrowRight' },
+      'home':      { key: 'Home', code: 'Home' },
+      'end':       { key: 'End', code: 'End' },
+      'pageup':    { key: 'PageUp', code: 'PageUp' },
+      'pagedown':  { key: 'PageDown', code: 'PageDown' },
+      'space':     { key: ' ', code: 'Space', text: ' ' },
+    };
+
+    const info = keyMap[key.toLowerCase()];
+    if (!info) {
+      throw new Error(`Unknown key: ${key}. Supported: ${Object.keys(keyMap).join(', ')}`);
+    }
+
+    const eventBase: Record<string, unknown> = {
+      key: info.key,
+      code: info.code,
+    };
+    if (info.text) eventBase.text = info.text;
+
+    await this.transport.send('Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      ...eventBase,
+    });
+    await this.transport.send('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: info.key,
+      code: info.code,
+    });
+  }
+
+  /**
+   * Map a character to proper CDP key/code values.
+   */
+  private _charToKeyInfo(char: string): { key: string; code: string } {
+    // Digits
+    if (char >= '0' && char <= '9') {
+      return { key: char, code: `Digit${char}` };
+    }
+    // Lowercase letters
+    if (char >= 'a' && char <= 'z') {
+      return { key: char, code: `Key${char.toUpperCase()}` };
+    }
+    // Uppercase letters
+    if (char >= 'A' && char <= 'Z') {
+      return { key: char, code: `Key${char}` };
+    }
+    // Space
+    if (char === ' ') {
+      return { key: ' ', code: 'Space' };
+    }
+    // Common punctuation
+    const punctuation: Record<string, string> = {
+      '-': 'Minus', '=': 'Equal', '[': 'BracketLeft', ']': 'BracketRight',
+      '\\': 'Backslash', ';': 'Semicolon', "'": 'Quote', ',': 'Comma',
+      '.': 'Period', '/': 'Slash', '`': 'Backquote',
+      '!': 'Digit1', '@': 'Digit2', '#': 'Digit3', '$': 'Digit4',
+      '%': 'Digit5', '^': 'Digit6', '&': 'Digit7', '*': 'Digit8',
+      '(': 'Digit9', ')': 'Digit0', '_': 'Minus', '+': 'Equal',
+      '{': 'BracketLeft', '}': 'BracketRight', '|': 'Backslash',
+      ':': 'Semicolon', '"': 'Quote', '<': 'Comma', '>': 'Period',
+      '?': 'Slash', '~': 'Backquote',
+    };
+    if (punctuation[char]) {
+      return { key: char, code: punctuation[char] };
+    }
+    // Korean / Unicode / unknown: key=char, code=Unidentified (CDP text field handles insertion)
+    return { key: char, code: 'Unidentified' };
+  }
+
   async fill(selector: string, text: string): Promise<void> {
     await this.transport.send('Runtime.evaluate', {
       expression: `
         (function() {
           const el = document.querySelector(${JSON.stringify(selector)});
           if (!el) throw new Error('Element not found: ' + ${JSON.stringify(selector)});
+
+          // Try WebSquare setValue first
+          if (typeof window.WebSquare !== 'undefined' && WebSquare.util && typeof WebSquare.util.getComponentById === 'function') {
+            var comp = null;
+            try { comp = WebSquare.util.getComponentById(el.id); } catch(e) {}
+            if (!comp || typeof comp.setValue !== 'function') {
+              try { comp = WebSquare.util.getComponentById(el.parentElement.id); } catch(e) {}
+            }
+            if (comp && typeof comp.setValue === 'function') {
+              comp.setValue(${JSON.stringify(text)});
+              return;
+            }
+          }
+
+          // Fallback: DOM-based fill
           el.focus();
           const nativeSetter = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype, 'value'
@@ -142,14 +463,18 @@ export class BrowserController {
     const remoteObject = resolveResult.object as Record<string, unknown>;
     const objectId = remoteObject.objectId as string;
 
-    // 2. Focus the element first
+    // 2. Try WebSquare setValue first (handles internal state model)
+    const wsHandled = await this.tryWebSquareSetValue(objectId, text);
+    if (wsHandled) return;
+
+    // 3. Focus the element first
     await this.transport.send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: `function() { this.focus(); }`,
       returnByValue: true,
     });
 
-    // 3. Clear existing value and type using Input.dispatchKeyEvent for React compatibility
+    // 4. Clear existing value and type using native setter for React compatibility
     await this.transport.send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: `
@@ -187,14 +512,18 @@ export class BrowserController {
     const remoteObject = resolveResult.object as Record<string, unknown>;
     const objectId = remoteObject.objectId as string;
 
-    // 2. Focus the element
+    // 2. Try WebSquare setValue first (handles internal state model)
+    const wsHandled = await this.tryWebSquareSetValue(objectId, text);
+    if (wsHandled) return;
+
+    // 3. Focus the element
     await this.transport.send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: `function() { this.focus(); this.value = ''; }`,
       returnByValue: true,
     });
 
-    // 3. Click the element to ensure it's active
+    // 4. Click the element to ensure it's active
     try {
       const boxResult = await this.transport.send('DOM.getBoxModel', {
         backendNodeId,
@@ -208,19 +537,11 @@ export class BrowserController {
       // fallback: just focus
     }
 
-    // 4. Type character by character with random delays
+    // 5. Type character by character with random delays
+    // Uses Input.insertText for reliable text insertion (handles Korean IME, Unicode, etc.)
     for (const char of text) {
-      await this.transport.send('Input.dispatchKeyEvent', {
-        type: 'keyDown',
+      await this.transport.send('Input.insertText', {
         text: char,
-        key: char,
-        code: `Key${char.toUpperCase()}`,
-        unmodifiedText: char,
-      });
-      await this.transport.send('Input.dispatchKeyEvent', {
-        type: 'keyUp',
-        key: char,
-        code: `Key${char.toUpperCase()}`,
       });
 
       // Random delay: 50–150ms
@@ -228,7 +549,7 @@ export class BrowserController {
       await new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    // 5. Dispatch input and change events
+    // 6. Dispatch input and change events
     await this.transport.send('Runtime.callFunctionOn', {
       objectId,
       functionDeclaration: `function() {

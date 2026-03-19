@@ -15,6 +15,98 @@ function estimateTokens(text) {
   return Math.ceil(str.length / 4);
 }
 
+// ─── Tandem Helpers (AXTree via CDP) ─────────────────────────────
+// Replicates Tandem Browser's snapshot approach:
+// Uses Accessibility.getFullAXTree() via CDP, builds tree, assigns @refs,
+// formats as indented text: "- role "name" [@ref] attrs"
+
+const TANDEM_INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'textbox', 'checkbox', 'radio',
+  'combobox', 'menuitem', 'tab', 'searchbox',
+]);
+
+function tandemBuildTree(rawNodes) {
+  if (rawNodes.length === 0) return [];
+  const nodeMap = new Map();
+  for (const raw of rawNodes) nodeMap.set(raw.nodeId, raw);
+
+  function convert(raw) {
+    const role = raw.role?.value || 'none';
+    const name = raw.name?.value || '';
+    const value = raw.value?.value || '';
+    const children = [];
+    if (raw.childIds) {
+      for (const childId of raw.childIds) {
+        const child = nodeMap.get(childId);
+        if (child) children.push(convert(child));
+      }
+    }
+    return { role, name: name || undefined, value: value || undefined, children };
+  }
+
+  return [convert(rawNodes[0])];
+}
+
+function tandemFilterCompact(nodes) {
+  const result = [];
+  for (const node of nodes) {
+    const filteredChildren = tandemFilterCompact(node.children);
+    const hasName = !!node.name;
+    const isInteractive = TANDEM_INTERACTIVE_ROLES.has(node.role);
+    const hasValue = !!node.value;
+    const hasMeaningfulChildren = filteredChildren.length > 0;
+    if (hasName || isInteractive || hasValue || hasMeaningfulChildren) {
+      result.push({ ...node, children: filteredChildren });
+    }
+  }
+  return result;
+}
+
+function tandemAssignRefs(nodes, state = { counter: 0 }) {
+  for (const node of nodes) {
+    if (node.name || TANDEM_INTERACTIVE_ROLES.has(node.role)) {
+      state.counter++;
+      node.ref = `@e${state.counter}`;
+    }
+    tandemAssignRefs(node.children, state);
+  }
+  return state.counter;
+}
+
+function tandemFormatTree(nodes, indent = 0) {
+  const lines = [];
+  const prefix = '  '.repeat(indent);
+  for (const node of nodes) {
+    let line = `${prefix}- ${node.role}`;
+    if (node.name) line += ` "${node.name}"`;
+    if (node.ref) line += ` [${node.ref}]`;
+    if (node.value) line += ` value="${node.value}"`;
+    lines.push(line);
+    if (node.children.length > 0) {
+      lines.push(tandemFormatTree(node.children, indent + 1));
+    }
+  }
+  return lines.join('\n');
+}
+
+function tandemCountNodes(nodes) {
+  let count = 0;
+  for (const node of nodes) {
+    count++;
+    count += tandemCountNodes(node.children);
+  }
+  return count;
+}
+
+function tandemCountByRole(nodes, roleSet) {
+  let count = 0;
+  for (const node of nodes) {
+    if (roleSet.has(node.role)) count++;
+    count += tandemCountByRole(node.children, roleSet);
+  }
+  return count;
+}
+
 // ─── Edge Case Test Sites ────────────────────────────────────────
 
 const EDGE_CASES = [
@@ -209,6 +301,64 @@ async function testPuppeteer(targets) {
   return results;
 }
 
+// ─── Tandem Browser (AXTree via CDP) ─────────────────────────────
+
+async function testTandem(targets) {
+  let puppeteer;
+  try {
+    puppeteer = await import('puppeteer');
+  } catch {
+    return [];
+  }
+
+  const browser = await puppeteer.default.launch({ headless: 'new' });
+  const page = await browser.newPage();
+  const client = await page.createCDPSession();
+  const results = [];
+
+  for (const target of targets) {
+    const r = { name: target.name, category: target.category, tool: 'Tandem' };
+    try {
+      const navStart = performance.now();
+      await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+      r.navTime = Math.round(performance.now() - navStart);
+
+      const obsStart = performance.now();
+      await client.send('Accessibility.enable');
+      const axResult = await client.send('Accessibility.getFullAXTree');
+      const rawNodes = axResult.nodes || [];
+
+      // Build tree (Tandem's approach: buildTree -> filterCompact -> assignRefs -> formatTree)
+      let tree = tandemBuildTree(rawNodes);
+      tree = tandemFilterCompact(tree);
+      const refCount = tandemAssignRefs(tree);
+      const text = tandemFormatTree(tree);
+
+      r.observeTime = Math.round(performance.now() - obsStart);
+      r.tokens = estimateTokens(text);
+
+      // Count element types
+      r.links = tandemCountByRole(tree, new Set(['link']));
+      r.buttons = tandemCountByRole(tree, new Set(['button']));
+      r.inputs = tandemCountByRole(tree, new Set(['textbox', 'searchbox', 'combobox', 'checkbox', 'radio']));
+      r.headings = tandemCountByRole(tree, new Set(['heading']));
+      r.images = tandemCountByRole(tree, new Set(['img', 'image']));
+      r.selects = 0;
+      r.textareas = 0;
+      r.totalElements = refCount;
+
+      r.success = true;
+    } catch (e) {
+      r.success = false;
+      r.error = e.message?.substring(0, 120);
+    }
+    results.push(r);
+  }
+
+  await browser.close();
+  return results;
+}
+
 // ─── Ground Truth ────────────────────────────────────────────────
 
 async function collectGroundTruth(targets) {
@@ -310,10 +460,19 @@ async function main() {
     console.log(`  ⚠️ Puppeteer failed: ${e.message?.substring(0, 80)}`);
   }
 
+  console.log('  🔗 Tandem Browser (AXTree via CDP)...');
+  let tandemRes = [];
+  try {
+    tandemRes = await testTandem(EDGE_CASES);
+  } catch (e) {
+    console.log(`  ⚠️ Tandem failed: ${e.message?.substring(0, 80)}`);
+  }
+
   const tools = [
     { name: 'Cheliped', results: chelipedRes },
     { name: 'Playwright', results: playwrightRes },
     { name: 'Puppeteer', results: puppeteerRes },
+    { name: 'Tandem', results: tandemRes },
   ];
 
   // ─── Output ────────────────────────────────────────────────────
@@ -341,31 +500,33 @@ async function main() {
   console.log('');
   console.log('## Navigation Success');
   console.log('');
-  console.log('| Site | Category | Cheliped | Playwright | Puppeteer |');
-  console.log('|------|----------|----------|------------|-----------|');
+  console.log('| Site | Category | Cheliped | Playwright | Puppeteer | Tandem |');
+  console.log('|------|----------|----------|------------|-----------|--------|');
   for (const ec of EDGE_CASES) {
     const ch = chelipedRes.find(r => r.name === ec.name);
     const pw = playwrightRes.find(r => r.name === ec.name);
     const pp = puppeteerRes.find(r => r.name === ec.name);
+    const td = tandemRes.find(r => r.name === ec.name);
     const status = r => {
       if (!r) return '—';
       return r.success ? `✅ ${r.navTime}ms` : `❌`;
     };
-    console.log(`| ${ec.name} | ${ec.category} | ${status(ch)} | ${status(pw)} | ${status(pp)} |`);
+    console.log(`| ${ec.name} | ${ec.category} | ${status(ch)} | ${status(pw)} | ${status(pp)} | ${status(td)} |`);
   }
 
   // Token comparison
   console.log('');
   console.log('## Token Output');
   console.log('');
-  console.log('| Site | Category | Cheliped | Playwright | Puppeteer |');
-  console.log('|------|----------|--------:|----------:|----------:|');
+  console.log('| Site | Category | Cheliped | Playwright | Puppeteer | Tandem |');
+  console.log('|------|----------|--------:|----------:|----------:|-------:|');
   for (const ec of EDGE_CASES) {
     const ch = chelipedRes.find(r => r.name === ec.name);
     const pw = playwrightRes.find(r => r.name === ec.name);
     const pp = puppeteerRes.find(r => r.name === ec.name);
+    const td = tandemRes.find(r => r.name === ec.name);
     const tok = r => r?.success ? r.tokens.toLocaleString() : '❌';
-    console.log(`| ${ec.name} | ${ec.category} | ${tok(ch)} | ${tok(pw)} | ${tok(pp)} |`);
+    console.log(`| ${ec.name} | ${ec.category} | ${tok(ch)} | ${tok(pw)} | ${tok(pp)} | ${tok(td)} |`);
   }
 
   // Element detection comparison
@@ -404,14 +565,15 @@ async function main() {
   console.log('');
   console.log('## Extraction Speed');
   console.log('');
-  console.log('| Site | Category | Cheliped | Playwright | Puppeteer |');
-  console.log('|------|----------|--------:|----------:|----------:|');
+  console.log('| Site | Category | Cheliped | Playwright | Puppeteer | Tandem |');
+  console.log('|------|----------|--------:|----------:|----------:|-------:|');
   for (const ec of EDGE_CASES) {
     const ch = chelipedRes.find(r => r.name === ec.name);
     const pw = playwrightRes.find(r => r.name === ec.name);
     const pp = puppeteerRes.find(r => r.name === ec.name);
+    const td = tandemRes.find(r => r.name === ec.name);
     const ms = r => r?.success ? `${r.observeTime}ms` : '❌';
-    console.log(`| ${ec.name} | ${ec.category} | ${ms(ch)} | ${ms(pw)} | ${ms(pp)} |`);
+    console.log(`| ${ec.name} | ${ec.category} | ${ms(ch)} | ${ms(pw)} | ${ms(pp)} | ${ms(td)} |`);
   }
 
   // ─── Per-category analysis ─────────────────────────────────────
@@ -433,6 +595,7 @@ async function main() {
       const ch = chelipedRes.find(r => r.name === site.name);
       const pw = playwrightRes.find(r => r.name === site.name);
       const pp = puppeteerRes.find(r => r.name === site.name);
+      const td = tandemRes.find(r => r.name === site.name);
 
       console.log(`**${site.name}** (${site.url})`);
 
@@ -457,6 +620,9 @@ async function main() {
       if (pp?.success) {
         console.log(`  Puppeteer: ${pp.tokens} tok, ${pp.observeTime}ms | Links: ${pp.links} | Btns: ${pp.buttons} | Inputs: ${pp.inputs} | Headings: ${pp.headings}`);
       }
+      if (td?.success) {
+        console.log(`  Tandem: ${td.tokens} tok, ${td.observeTime}ms | Links: ${td.links} | Btns: ${td.buttons} | Inputs: ${td.inputs} | Headings: ${td.headings}`);
+      }
       console.log('');
     }
   }
@@ -471,20 +637,23 @@ async function main() {
   const chSuccessCount = chelipedRes.filter(r => r.success).length;
   const pwSuccessCount = playwrightRes.filter(r => r.success).length;
   const ppSuccessCount = puppeteerRes.filter(r => r.success).length;
+  const tdSuccessCount = tandemRes.filter(r => r.success).length;
 
-  console.log(`Navigation success: Cheliped ${chSuccessCount}/${EDGE_CASES.length} | Playwright ${pwSuccessCount}/${EDGE_CASES.length} | Puppeteer ${ppSuccessCount}/${EDGE_CASES.length}`);
+  console.log(`Navigation success: Cheliped ${chSuccessCount}/${EDGE_CASES.length} | Playwright ${pwSuccessCount}/${EDGE_CASES.length} | Puppeteer ${ppSuccessCount}/${EDGE_CASES.length} | Tandem ${tdSuccessCount}/${EDGE_CASES.length}`);
 
   const chAvgTokens = chelipedRes.filter(r => r.success).reduce((s, r) => s + r.tokens, 0) / chSuccessCount || 0;
   const pwAvgTokens = playwrightRes.filter(r => r.success).reduce((s, r) => s + r.tokens, 0) / pwSuccessCount || 0;
   const ppAvgTokens = puppeteerRes.filter(r => r.success).reduce((s, r) => s + r.tokens, 0) / ppSuccessCount || 0;
+  const tdAvgTokens = tandemRes.filter(r => r.success).reduce((s, r) => s + r.tokens, 0) / tdSuccessCount || 0;
 
-  console.log(`Avg tokens: Cheliped ${Math.round(chAvgTokens)} | Playwright ${Math.round(pwAvgTokens)} | Puppeteer ${Math.round(ppAvgTokens)}`);
+  console.log(`Avg tokens: Cheliped ${Math.round(chAvgTokens)} | Playwright ${Math.round(pwAvgTokens)} | Puppeteer ${Math.round(ppAvgTokens)} | Tandem ${Math.round(tdAvgTokens)}`);
 
   const chAvgSpeed = chelipedRes.filter(r => r.success).reduce((s, r) => s + r.observeTime, 0) / chSuccessCount || 0;
   const pwAvgSpeed = playwrightRes.filter(r => r.success).reduce((s, r) => s + r.observeTime, 0) / pwSuccessCount || 0;
   const ppAvgSpeed = puppeteerRes.filter(r => r.success).reduce((s, r) => s + r.observeTime, 0) / ppSuccessCount || 0;
+  const tdAvgSpeed = tandemRes.filter(r => r.success).reduce((s, r) => s + r.observeTime, 0) / tdSuccessCount || 0;
 
-  console.log(`Avg speed: Cheliped ${Math.round(chAvgSpeed)}ms | Playwright ${Math.round(pwAvgSpeed)}ms | Puppeteer ${Math.round(ppAvgSpeed)}ms`);
+  console.log(`Avg speed: Cheliped ${Math.round(chAvgSpeed)}ms | Playwright ${Math.round(pwAvgSpeed)}ms | Puppeteer ${Math.round(ppAvgSpeed)}ms | Tandem ${Math.round(tdAvgSpeed)}ms`);
 
   console.log('');
   console.log('Done. 🦀');

@@ -223,6 +223,149 @@ async function testPuppeteer(targets) {
   return results;
 }
 
+// ─── Tandem Browser (AXTree via CDP) ─────────────────────────────
+// Replicates Tandem Browser's snapshot approach:
+// Uses Accessibility.getFullAXTree() via CDP, builds tree, assigns @refs,
+// formats as indented text: "- role "name" [@ref] attrs"
+
+const TANDEM_INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'textbox', 'checkbox', 'radio',
+  'combobox', 'menuitem', 'tab', 'searchbox',
+]);
+
+function tandemBuildTree(rawNodes) {
+  if (rawNodes.length === 0) return [];
+  const nodeMap = new Map();
+  for (const raw of rawNodes) nodeMap.set(raw.nodeId, raw);
+
+  function convert(raw) {
+    const role = raw.role?.value || 'none';
+    const name = raw.name?.value || '';
+    const value = raw.value?.value || '';
+    const children = [];
+    if (raw.childIds) {
+      for (const childId of raw.childIds) {
+        const child = nodeMap.get(childId);
+        if (child) children.push(convert(child));
+      }
+    }
+    return { role, name: name || undefined, value: value || undefined, children };
+  }
+
+  return [convert(rawNodes[0])];
+}
+
+function tandemFilterCompact(nodes) {
+  const result = [];
+  for (const node of nodes) {
+    const filteredChildren = tandemFilterCompact(node.children);
+    const hasName = !!node.name;
+    const isInteractive = TANDEM_INTERACTIVE_ROLES.has(node.role);
+    const hasValue = !!node.value;
+    const hasMeaningfulChildren = filteredChildren.length > 0;
+    if (hasName || isInteractive || hasValue || hasMeaningfulChildren) {
+      result.push({ ...node, children: filteredChildren });
+    }
+  }
+  return result;
+}
+
+function tandemAssignRefs(nodes, state = { counter: 0 }) {
+  for (const node of nodes) {
+    if (node.name || TANDEM_INTERACTIVE_ROLES.has(node.role)) {
+      state.counter++;
+      node.ref = `@e${state.counter}`;
+    }
+    tandemAssignRefs(node.children, state);
+  }
+  return state.counter;
+}
+
+function tandemFormatTree(nodes, indent = 0) {
+  const lines = [];
+  const prefix = '  '.repeat(indent);
+  for (const node of nodes) {
+    let line = `${prefix}- ${node.role}`;
+    if (node.name) line += ` "${node.name}"`;
+    if (node.ref) line += ` [${node.ref}]`;
+    if (node.value) line += ` value="${node.value}"`;
+    lines.push(line);
+    if (node.children.length > 0) {
+      lines.push(tandemFormatTree(node.children, indent + 1));
+    }
+  }
+  return lines.join('\n');
+}
+
+function tandemCountNodes(nodes) {
+  let count = 0;
+  for (const node of nodes) {
+    count++;
+    count += tandemCountNodes(node.children);
+  }
+  return count;
+}
+
+function tandemCountByRole(nodes, roles) {
+  let count = 0;
+  for (const node of nodes) {
+    if (roles.includes(node.role)) count++;
+    count += tandemCountByRole(node.children, roles);
+  }
+  return count;
+}
+
+async function testTandem(targets) {
+  let puppeteer;
+  try {
+    puppeteer = await import('puppeteer');
+  } catch {
+    return [];
+  }
+
+  const browser = await puppeteer.default.launch({ headless: 'new' });
+  const page = await browser.newPage();
+  const results = [];
+
+  const client = await page.createCDPSession();
+
+  for (const target of targets) {
+    const r = { name: target.name, category: target.category, tool: 'Tandem' };
+    try {
+      const navStart = performance.now();
+      await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      r.navTime = Math.round(performance.now() - navStart);
+
+      const obsStart = performance.now();
+      await client.send('Accessibility.enable');
+      const axResult = await client.send('Accessibility.getFullAXTree');
+      const rawNodes = axResult.nodes || [];
+
+      let tree = tandemBuildTree(rawNodes);
+      tree = tandemFilterCompact(tree);
+      tandemAssignRefs(tree);
+      const text = tandemFormatTree(tree);
+      r.observeTime = Math.round(performance.now() - obsStart);
+
+      r.tokens = estimateTokens(text);
+      r.links = tandemCountByRole(tree, ['link']);
+      r.buttons = tandemCountByRole(tree, ['button']);
+      r.inputs = tandemCountByRole(tree, ['textbox', 'searchbox', 'combobox', 'checkbox', 'radio']);
+      r.headings = tandemCountByRole(tree, ['heading']);
+      r.totalInteractive = r.links + r.buttons + r.inputs;
+
+      r.success = true;
+    } catch (e) {
+      r.success = false;
+      r.error = e.message?.substring(0, 120);
+    }
+    results.push(r);
+  }
+
+  await browser.close();
+  return results;
+}
+
 // ─── Ground Truth ────────────────────────────────────────────────
 
 async function collectGroundTruth(targets) {
@@ -320,6 +463,14 @@ async function main() {
     console.log(`  ⚠️ Puppeteer failed: ${e.message?.substring(0, 80)}`);
   }
 
+  console.log('  🔗 Tandem Browser (AXTree via CDP)...');
+  let tandemRes = [];
+  try {
+    tandemRes = await testTandem(CHALLENGES);
+  } catch (e) {
+    console.log(`  ⚠️ Tandem failed: ${e.message?.substring(0, 80)}`);
+  }
+
   // ─── Output ────────────────────────────────────────────────────
 
   console.log('');
@@ -345,31 +496,33 @@ async function main() {
   console.log('');
   console.log('## Token Output & Speed');
   console.log('');
-  console.log('| Site | Category | Cheliped Tok | CH Speed | PW Tok | PW Speed | PP Tok | PP Speed |');
-  console.log('|------|----------|------------:|--------:|-------:|--------:|-------:|--------:|');
+  console.log('| Site | Category | Cheliped Tok | CH Speed | PW Tok | PW Speed | PP Tok | PP Speed | TD Tok | TD Speed |');
+  console.log('|------|----------|------------:|--------:|-------:|--------:|-------:|--------:|-------:|--------:|');
   for (const ch of CHALLENGES) {
     const cr = chelipedRes.find(r => r.name === ch.name);
     const pr = playwrightRes.find(r => r.name === ch.name);
     const pp = puppeteerRes.find(r => r.name === ch.name);
+    const td = tandemRes.find(r => r.name === ch.name);
     const tok = r => r?.success ? r.tokens.toLocaleString() : '❌';
     const spd = r => r?.success ? `${r.observeTime}ms` : '❌';
-    console.log(`| ${ch.name} | ${ch.category} | ${tok(cr)} | ${spd(cr)} | ${tok(pr)} | ${spd(pr)} | ${tok(pp)} | ${spd(pp)} |`);
+    console.log(`| ${ch.name} | ${ch.category} | ${tok(cr)} | ${spd(cr)} | ${tok(pr)} | ${spd(pr)} | ${tok(pp)} | ${spd(pp)} | ${tok(td)} | ${spd(td)} |`);
   }
 
   // Element detection
   console.log('');
-  console.log('## Element Detection (Cheliped vs Ground Truth)');
+  console.log('## Element Detection (vs Ground Truth)');
   console.log('');
-  console.log('| Site | GT Links | CH Links | GT Btns | CH Btns | GT Inputs | CH Inputs | GT Hdgs | CH Hdgs |');
-  console.log('|------|--------:|--------:|--------:|--------:|----------:|----------:|--------:|--------:|');
+  console.log('| Site | GT Links | CH Links | PW Links | PP Links | TD Links | GT Btns | CH Btns | PW Btns | PP Btns | TD Btns | GT Inputs | CH Inputs | PW Inputs | PP Inputs | TD Inputs | GT Hdgs | CH Hdgs | PW Hdgs | PP Hdgs | TD Hdgs |');
+  console.log('|------|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:|--------:|----------:|----------:|----------:|----------:|----------:|--------:|--------:|--------:|--------:|--------:|');
   for (const ch of CHALLENGES) {
     const gt = groundTruth.find(g => g.name === ch.name);
     const cr = chelipedRes.find(r => r.name === ch.name);
-    if (!gt || gt.error || !cr?.success) {
-      console.log(`| ${ch.name} | — | — | — | — | — | — | — | — |`);
-      continue;
-    }
-    console.log(`| ${ch.name} | ${gt.links} | ${cr.links} | ${gt.buttons} | ${cr.buttons} | ${gt.inputs} | ${cr.inputs} | ${gt.headings} | ${cr.headings} |`);
+    const pr = playwrightRes.find(r => r.name === ch.name);
+    const pp = puppeteerRes.find(r => r.name === ch.name);
+    const td = tandemRes.find(r => r.name === ch.name);
+    const v = (r, key) => r?.success ? r[key] : '❌';
+    const gtv = (key) => (!gt || gt.error) ? '—' : gt[key];
+    console.log(`| ${ch.name} | ${gtv('links')} | ${v(cr,'links')} | ${v(pr,'links')} | ${v(pp,'links')} | ${v(td,'links')} | ${gtv('buttons')} | ${v(cr,'buttons')} | ${v(pr,'buttons')} | ${v(pp,'buttons')} | ${v(td,'buttons')} | ${gtv('inputs')} | ${v(cr,'inputs')} | ${v(pr,'inputs')} | ${v(pp,'inputs')} | ${v(td,'inputs')} | ${gtv('headings')} | ${v(cr,'headings')} | ${v(pr,'headings')} | ${v(pp,'headings')} | ${v(td,'headings')} |`);
   }
 
   // Fast extract() performance
@@ -405,6 +558,7 @@ async function main() {
       const cr = chelipedRes.find(r => r.name === site.name);
       const pr = playwrightRes.find(r => r.name === site.name);
       const pp = puppeteerRes.find(r => r.name === site.name);
+      const td = tandemRes.find(r => r.name === site.name);
 
       console.log(`**${site.name}** (${site.url})`);
       if (gt && !gt.error) {
@@ -426,6 +580,10 @@ async function main() {
         console.log(`  Puppeteer: ${pp.tokens.toLocaleString()} tok, ${pp.observeTime}ms`);
         console.log(`    → Links: ${pp.links}, Buttons: ${pp.buttons}, Inputs: ${pp.inputs}, Headings: ${pp.headings}`);
       }
+      if (td?.success) {
+        console.log(`  Tandem: ${td.tokens.toLocaleString()} tok, ${td.observeTime}ms`);
+        console.log(`    → Links: ${td.links}, Buttons: ${td.buttons}, Inputs: ${td.inputs}, Headings: ${td.headings}`);
+      }
       console.log('');
     }
   }
@@ -440,8 +598,9 @@ async function main() {
   const chOk = chelipedRes.filter(r => r.success);
   const pwOk = playwrightRes.filter(r => r.success);
   const ppOk = puppeteerRes.filter(r => r.success);
+  const tdOk = tandemRes.filter(r => r.success);
 
-  console.log(`Navigation success: Cheliped ${chOk.length}/${CHALLENGES.length} | Playwright ${pwOk.length}/${CHALLENGES.length} | Puppeteer ${ppOk.length}/${CHALLENGES.length}`);
+  console.log(`Navigation success: Cheliped ${chOk.length}/${CHALLENGES.length} | Playwright ${pwOk.length}/${CHALLENGES.length} | Puppeteer ${ppOk.length}/${CHALLENGES.length} | Tandem ${tdOk.length}/${CHALLENGES.length}`);
 
   if (chOk.length > 0) {
     const avgTok = Math.round(chOk.reduce((s, r) => s + r.tokens, 0) / chOk.length);
@@ -459,6 +618,11 @@ async function main() {
     const avgTok = Math.round(ppOk.reduce((s, r) => s + r.tokens, 0) / ppOk.length);
     const avgObs = Math.round(ppOk.reduce((s, r) => s + r.observeTime, 0) / ppOk.length);
     console.log(`Puppeteer avg: ${avgTok} tok | ${avgObs}ms`);
+  }
+  if (tdOk.length > 0) {
+    const avgTok = Math.round(tdOk.reduce((s, r) => s + r.tokens, 0) / tdOk.length);
+    const avgObs = Math.round(tdOk.reduce((s, r) => s + r.observeTime, 0) / tdOk.length);
+    console.log(`Tandem avg: ${avgTok} tok | ${avgObs}ms`);
   }
 
   // Identify problem areas for Cheliped

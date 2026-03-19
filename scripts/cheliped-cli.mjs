@@ -165,6 +165,38 @@ async function executeCommand(cheliped, cmdObj) {
       return await cheliped.selectOption(agentId, value);
     }
 
+    case 'fill-selector': {
+      const selector = args[0];
+      const text = args[1];
+      if (!selector) throw new Error('fill-selector: CSS 선택자가 필요합니다. (예: "#inputId", ".w2input")');
+      if (text === undefined) throw new Error('fill-selector: 입력할 텍스트가 필요합니다.');
+      return await cheliped.fillBySelector(selector, text);
+    }
+
+    case 'click-selector': {
+      const selector = args[0];
+      if (!selector) throw new Error('click-selector: CSS 선택자가 필요합니다.');
+      return await cheliped.clickBySelector(selector);
+    }
+
+    case 'focus-selector': {
+      const selector = args[0];
+      if (!selector) throw new Error('focus-selector: CSS 선택자가 필요합니다.');
+      return await cheliped.focusBySelector(selector);
+    }
+
+    case 'type': {
+      const text = args[0];
+      if (text === undefined) throw new Error('type: 입력할 텍스트가 필요합니다.');
+      return await cheliped.type(text);
+    }
+
+    case 'press-key': {
+      const key = args[0];
+      if (!key) throw new Error('press-key: 키 이름이 필요합니다. (예: "Enter", "Tab", "Backspace")');
+      return await cheliped.pressKey(key);
+    }
+
     case 'wait': {
       const ms = parseInt(args[0] || '1000', 10);
       await new Promise(resolve => setTimeout(resolve, ms));

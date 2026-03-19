@@ -12,8 +12,9 @@ export interface ObserveResult {
 
 export interface ActResult {
   success: boolean;
-  action: 'click' | 'fill';
+  action: 'click' | 'fill' | 'type' | 'focus' | 'press-key';
   agentId: number;
+  selector?: string;
 }
 
 export interface ExtractResult {

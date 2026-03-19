@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // benchmark-quality.mjs — Content Recognition Quality Benchmark
 // Measures: text recall, link accuracy, interactive element detection, content fidelity
-// Compares Cheliped vs agent-browser vs Playwright vs Puppeteer
+// Compares Cheliped vs agent-browser vs Playwright vs Puppeteer vs Tandem
 
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -386,6 +386,130 @@ function getAgentBrowserOutput(targets) {
   return results;
 }
 
+// ─── Tandem Browser (AXTree via CDP) ─────────────────────────────
+// Replicates Tandem Browser's snapshot approach:
+// Uses Accessibility.getFullAXTree() via CDP, builds tree, assigns @refs,
+// formats as indented text: "- role "name" [@ref] attrs"
+
+const TANDEM_INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'textbox', 'checkbox', 'radio',
+  'combobox', 'menuitem', 'tab', 'searchbox',
+]);
+
+function tandemBuildTree(rawNodes) {
+  if (rawNodes.length === 0) return [];
+  const nodeMap = new Map();
+  for (const raw of rawNodes) nodeMap.set(raw.nodeId, raw);
+
+  function convert(raw) {
+    const role = raw.role?.value || 'none';
+    const name = raw.name?.value || '';
+    const value = raw.value?.value || '';
+    const children = [];
+    if (raw.childIds) {
+      for (const childId of raw.childIds) {
+        const child = nodeMap.get(childId);
+        if (child) children.push(convert(child));
+      }
+    }
+    return { role, name: name || undefined, value: value || undefined, children };
+  }
+
+  return [convert(rawNodes[0])];
+}
+
+function tandemFilterCompact(nodes) {
+  const result = [];
+  for (const node of nodes) {
+    const filteredChildren = tandemFilterCompact(node.children);
+    const hasName = !!node.name;
+    const isInteractive = TANDEM_INTERACTIVE_ROLES.has(node.role);
+    const hasValue = !!node.value;
+    const hasMeaningfulChildren = filteredChildren.length > 0;
+    if (hasName || isInteractive || hasValue || hasMeaningfulChildren) {
+      result.push({ ...node, children: filteredChildren });
+    }
+  }
+  return result;
+}
+
+function tandemCountNodes(nodes) {
+  let count = 0;
+  for (const node of nodes) {
+    count++;
+    count += tandemCountNodes(node.children);
+  }
+  return count;
+}
+
+async function getTandemOutput(targets) {
+  console.log('  Tandem (AXTree via CDP)...');
+  const results = [];
+
+  let puppeteer;
+  try {
+    puppeteer = await import('puppeteer');
+  } catch {
+    console.log('    Puppeteer not installed, skipping Tandem benchmark.');
+    return results;
+  }
+
+  const browser = await puppeteer.default.launch({ headless: 'new' });
+  const page = await browser.newPage();
+  const client = await page.createCDPSession();
+
+  for (const target of targets) {
+    try {
+      await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+      await client.send('Accessibility.enable');
+      const axResult = await client.send('Accessibility.getFullAXTree');
+      const rawNodes = axResult.nodes || [];
+
+      let tree = tandemBuildTree(rawNodes);
+      tree = tandemFilterCompact(tree);
+
+      // Walk the compact tree to extract categorized elements
+      const links = [];
+      const buttons = [];
+      const inputs = [];
+      const headings = [];
+      const allTextParts = [];
+
+      function walk(node) {
+        if (!node) return;
+        const name = node.name || '';
+        if (name) allTextParts.push(name);
+
+        if (node.role === 'link' && name) links.push({ text: name.substring(0, 100), href: '' });
+        if (node.role === 'button' && name) buttons.push({ text: name.substring(0, 100) });
+        if (['textbox', 'searchbox', 'combobox', 'checkbox', 'radio'].includes(node.role)) {
+          inputs.push({ type: node.role, name, placeholder: '' });
+        }
+        if (node.role === 'heading' && name) headings.push(name);
+
+        if (node.children) node.children.forEach(walk);
+      }
+      tree.forEach(walk);
+
+      results.push({
+        name: target.name,
+        tool: 'Tandem',
+        links, buttons, inputs,
+        images: [],
+        headings,
+        allText: allTextParts.join(' '),
+        success: true,
+      });
+    } catch (e) {
+      results.push({ name: target.name, tool: 'Tandem', success: false, error: e.message?.substring(0, 80) });
+    }
+  }
+
+  await browser.close();
+  return results;
+}
+
 // ─── Quality Metrics ─────────────────────────────────────────────
 
 function computeTextRecall(truth, toolOutput) {
@@ -536,11 +660,19 @@ async function main() {
     console.log(`  ⚠️ Puppeteer failed: ${e.message}`);
   }
 
+  let tandemOut = [];
+  try {
+    tandemOut = await getTandemOutput(TARGETS);
+  } catch (e) {
+    console.log(`  ⚠️ Tandem failed: ${e.message}`);
+  }
+
   const tools = [
     { name: 'Cheliped', outputs: chelipedOut },
     { name: 'agent-browser', outputs: agentBrOut },
     { name: 'Playwright', outputs: playwrightOut },
     { name: 'Puppeteer', outputs: puppeteerOut },
+    { name: 'Tandem', outputs: tandemOut },
   ];
 
   // Step 3: Compute metrics

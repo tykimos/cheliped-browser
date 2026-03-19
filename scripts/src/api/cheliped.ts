@@ -187,6 +187,57 @@ export class Cheliped {
     return { success: true, action: 'fill', agentId };
   }
 
+  /**
+   * Fill by CSS selector — bypasses agentId. Uses human-like typing.
+   * Works with WebSquare, custom widgets, or any framework.
+   * Selector can be CSS selector or #id (e.g., '#myInput', '.w2input', '[data-id="field1"]').
+   */
+  async fillBySelector(selector: string, value: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.fillBySelector(selector, value);
+    return { success: true, action: 'fill', agentId: -1, selector };
+  }
+
+  /**
+   * Click by CSS selector — bypasses agentId.
+   * Works with WebSquare, custom widgets, or any framework.
+   */
+  async clickBySelector(selector: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.clickBySelector(selector);
+    return { success: true, action: 'click', agentId: -1, selector };
+  }
+
+  /**
+   * Focus an element by CSS selector.
+   * Useful before type() to direct keyboard input to a specific element.
+   */
+  async focusBySelector(selector: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.focusBySelector(selector);
+    return { success: true, action: 'focus', agentId: -1, selector };
+  }
+
+  /**
+   * Type text character-by-character into the currently focused element.
+   * Framework-agnostic: sends real CDP keyboard events.
+   * Use focusBySelector() first to target a specific element.
+   */
+  async type(text: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.type(text);
+    return { success: true, action: 'type', agentId: -1 };
+  }
+
+  /**
+   * Press a special key (Enter, Tab, Backspace, Escape, arrows, etc.).
+   */
+  async pressKey(key: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.pressKey(key);
+    return { success: true, action: 'press-key', agentId: -1 };
+  }
+
   /** Select a <select> option by visible text or value. */
   async selectOption(agentId: number, optionValue: string): Promise<ActResult> {
     this.ensureLaunched();
