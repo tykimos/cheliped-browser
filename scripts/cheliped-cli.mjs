@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 import { writeFile } from 'fs/promises';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { spawn } from 'child_process';
 
 // 세션 파일: Chrome PID + 포트 정보를 저장 (세션별로 동적으로 설정됨)
 let SESSION_FILE = '/tmp/cheliped-session-default.json';
@@ -263,7 +264,73 @@ async function executeCommand(cheliped, cmdObj) {
       return result;
     }
 
+    case 'monitor': {
+      const monitorPort = args[0] || '19222';
+      const pidFile = `/tmp/cheliped-monitor-${SESSION_FILE.split('-').pop().replace('.json', '')}.pid`;
+
+      // Check if already running
+      if (existsSync(pidFile)) {
+        try {
+          const pid = parseInt(readFileSync(pidFile, 'utf8'), 10);
+          process.kill(pid, 0);
+          return { success: true, message: '모니터 이미 실행 중', url: `http://localhost:${monitorPort}`, pid };
+        } catch {
+          // dead process, clean up
+        }
+      }
+
+      // Spawn monitor as background process
+      const monitorScript = resolve(CHELIPED_PROJECT, 'cheliped-monitor.mjs');
+      const sessionFlag = SESSION_FILE.split('-').pop().replace('.json', '');
+      const child = spawn('node', [monitorScript, '--session', sessionFlag, '--port', monitorPort], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+
+      // Wait briefly for monitor to start
+      await new Promise(r => setTimeout(r, 1500));
+      return { success: true, url: `http://localhost:${monitorPort}`, pid: child.pid };
+    }
+
+    case 'monitor-stop': {
+      const pidFile = `/tmp/cheliped-monitor-${SESSION_FILE.split('-').pop().replace('.json', '')}.pid`;
+      if (existsSync(pidFile)) {
+        try {
+          const pid = parseInt(readFileSync(pidFile, 'utf8'), 10);
+          process.kill(pid, 'SIGTERM');
+          return { success: true, message: '모니터 종료됨' };
+        } catch {
+          return { success: true, message: '모니터 이미 종료됨' };
+        }
+      }
+      return { success: true, message: '실행 중인 모니터 없음' };
+    }
+
+    case 'monitor-action': {
+      // Notify the monitor about current action (for action bar display)
+      const monitorPort = args[1] || '19222';
+      const action = args[0] || '';
+      try {
+        await fetch(`http://localhost:${monitorPort}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action }),
+        });
+      } catch { /* monitor not running */ }
+      return { success: true };
+    }
+
     case 'close': {
+      // Stop monitor if running
+      const monPidFile = `/tmp/cheliped-monitor-${SESSION_FILE.split('-').pop().replace('.json', '')}.pid`;
+      if (existsSync(monPidFile)) {
+        try {
+          const pid = parseInt(readFileSync(monPidFile, 'utf8'), 10);
+          process.kill(pid, 'SIGTERM');
+        } catch {}
+      }
+
       const session = loadSession();
       await cheliped.close();
       if (session?.pid) killChrome(session.pid);
