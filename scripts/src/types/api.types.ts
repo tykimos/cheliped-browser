@@ -40,3 +40,18 @@ export interface ActSemanticResult {
   actionId: string;
   actionType: string;
 }
+
+export type SearchEngine = 'google' | 'naver' | 'bing' | 'duckduckgo';
+
+export interface SearchResultItem {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+export interface SearchResult {
+  success: boolean;
+  engine: SearchEngine;
+  query: string;
+  results: SearchResultItem[];
+}

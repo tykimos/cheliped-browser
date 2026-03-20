@@ -224,6 +224,17 @@ async function executeCommand(cheliped, cmdObj) {
       return { success: true, result };
     }
 
+    case 'search': {
+      const query = args[0];
+      const engine = args[1] || 'google';
+      if (!query) throw new Error('search: 검색어가 필요합니다.');
+      const validEngines = ['google', 'naver', 'bing', 'duckduckgo'];
+      if (!validEngines.includes(engine)) {
+        throw new Error(`search: 엔진은 ${validEngines.join(', ')} 중 하나. 받은 값: ${engine}`);
+      }
+      return await cheliped.search(query, engine);
+    }
+
     case 'extract': {
       const type = args[0] || 'all';
       if (!['text', 'links', 'all'].includes(type)) {

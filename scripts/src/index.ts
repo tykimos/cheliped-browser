@@ -2,7 +2,7 @@
 export { Cheliped } from './api/cheliped.js';
 export type { AgentDom, AgentDomNode } from './types/agent-dom.types.js';
 export type { ChelipedOptions, LaunchResult, CompressionOptions } from './types/options.types.js';
-export type { GotoResult, ActResult, ExtractResult, ScreenshotResult, ObserveResult, DownloadResult, ActSemanticResult } from './types/api.types.js';
+export type { GotoResult, ActResult, ExtractResult, ScreenshotResult, ObserveResult, DownloadResult, ActSemanticResult, SearchResult, SearchResultItem, SearchEngine } from './types/api.types.js';
 export type { InternalDomNode, SemanticElement } from './types/internal-dom.types.js';
 
 // Phase 2 exports

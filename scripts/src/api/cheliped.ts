@@ -14,7 +14,7 @@ import { SecurityLayer } from '../security/security-layer.js';
 import { PromptGuard } from '../security/prompt-guard.js';
 import type { ChelipedOptions, LaunchResult } from '../types/options.types.js';
 import type { AgentDom } from '../types/agent-dom.types.js';
-import type { GotoResult, ActResult, ExtractResult, ScreenshotResult, DownloadResult, ActSemanticResult } from '../types/api.types.js';
+import type { GotoResult, ActResult, ExtractResult, ScreenshotResult, DownloadResult, ActSemanticResult, SearchResult, SearchEngine, SearchResultItem } from '../types/api.types.js';
 import type { UIGraph } from '../graph/ui-graph.types.js';
 import type { SemanticAction } from '../graph/action.types.js';
 
@@ -400,6 +400,129 @@ export class Cheliped {
         reject(err);
       });
     });
+  }
+
+  /**
+   * Search the web using a real browser. Free alternative to search APIs.
+   * Supports Google, Naver, Bing, DuckDuckGo.
+   */
+  async search(query: string, engine: SearchEngine = 'google'): Promise<SearchResult> {
+    this.ensureLaunched();
+
+    const searchUrls: Record<SearchEngine, string> = {
+      google: `https://www.google.com/search?q=${encodeURIComponent(query)}&hl=en`,
+      naver: `https://search.naver.com/search.naver?query=${encodeURIComponent(query)}`,
+      bing: `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
+      duckduckgo: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+    };
+
+    const url = searchUrls[engine];
+    if (!url) {
+      throw new Error(`Unsupported search engine: ${engine}. Use: google, naver, bing, duckduckgo`);
+    }
+
+    await this.controller!.goto(url);
+
+    const extractors: Record<SearchEngine, string> = {
+      google: `(function() {
+        const items = [];
+        const seen = new Set();
+        document.querySelectorAll('.MjjYud, #search .g, #rso .g, #rso > div').forEach(function(g) {
+          const a = g.querySelector('a[href]');
+          const h3 = g.querySelector('h3');
+          const snippet = g.querySelector('.VwiC3b, [data-sncf], [style*="-webkit-line-clamp"]');
+          if (a && h3) {
+            const href = a.href;
+            if (href && href.indexOf('google.') === -1 && !href.startsWith('/') && !seen.has(href)) {
+              seen.add(href);
+              items.push({
+                title: h3.textContent.trim(),
+                url: href,
+                snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+              });
+            }
+          }
+        });
+        return items.slice(0, 20);
+      })()`,
+
+      naver: `(function() {
+        const items = [];
+        const seen = new Set();
+        // Try modern Naver selectors first, then fallback
+        document.querySelectorAll('.lst_total .bx, .api_txt_lines, .total_wrap .sp_tl, .sc_new, [class*="total_group"]').forEach(function(el) {
+          const a = el.querySelector('a.api_txt_lines, a.link_tit, a.total_tit, a[href]');
+          const snippet = el.querySelector('.api_txt_lines.dsc_txt, .total_dsc, .dsc_txt, .api_txt_lines[class*="desc"]');
+          if (a && a.href && a.textContent.trim() && !seen.has(a.href)) {
+            seen.add(a.href);
+            items.push({
+              title: a.textContent.trim().slice(0, 200),
+              url: a.href,
+              snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+            });
+          }
+        });
+        // Fallback: extract all external links
+        if (items.length === 0) {
+          document.querySelectorAll('a[href]').forEach(function(a) {
+            const href = a.href;
+            if (href && href.indexOf('naver.com') === -1 && a.textContent.trim().length > 5 && !seen.has(href)) {
+              seen.add(href);
+              const parent = a.closest('li, .item, div');
+              const desc = parent ? parent.textContent.trim().slice(0, 300) : '';
+              items.push({ title: a.textContent.trim().slice(0, 200), url: href, snippet: desc });
+            }
+          });
+        }
+        return items.slice(0, 20);
+      })()`,
+
+      bing: `(function() {
+        const items = [];
+        document.querySelectorAll('#b_results .b_algo').forEach(function(el) {
+          const a = el.querySelector('h2 a');
+          const snippet = el.querySelector('.b_caption p, .b_lineclamp2');
+          if (a && a.href) {
+            items.push({
+              title: a.textContent.trim(),
+              url: a.href,
+              snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+            });
+          }
+        });
+        return items.slice(0, 20);
+      })()`,
+
+      duckduckgo: `(function() {
+        const items = [];
+        document.querySelectorAll('.result, .results_links').forEach(function(el) {
+          const a = el.querySelector('a.result__a, a.result__url');
+          const snippet = el.querySelector('.result__snippet, a.result__snippet');
+          if (a && a.href) {
+            items.push({
+              title: a.textContent.trim(),
+              url: a.href,
+              snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+            });
+          }
+        });
+        return items.slice(0, 20);
+      })()`,
+    };
+
+    const result = await this.connection!.getTransport().send('Runtime.evaluate', {
+      expression: extractors[engine],
+      returnByValue: true,
+    });
+
+    const results: SearchResultItem[] = (result as { result?: { value?: SearchResultItem[] } })?.result?.value ?? [];
+
+    return {
+      success: true,
+      engine,
+      query,
+      results,
+    };
   }
 
   getSecurityViolations() {

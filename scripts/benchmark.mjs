@@ -142,6 +142,40 @@ async function runBenchmark() {
     console.log(`  ${result.success ? '✅' : '❌'} Done (${formatMs(result.navTime || 0)})`);
   }
 
+  // 9. Search benchmark
+  console.log('');
+  console.log('── Search Benchmark ──');
+
+  const SEARCH_TARGETS = [
+    { engine: 'google', query: 'browser automation AI agent' },
+    { engine: 'naver', query: '브라우저 자동화 AI' },
+    { engine: 'bing', query: 'browser automation AI agent' },
+    { engine: 'duckduckgo', query: 'browser automation AI agent' },
+  ];
+
+  const searchResults = [];
+
+  for (const st of SEARCH_TARGETS) {
+    console.log(`  Searching: ${st.engine} "${st.query}"`);
+    const sr = { engine: st.engine, query: st.query };
+    try {
+      const searchStart = performance.now();
+      const res = await cheliped.search(st.query, st.engine);
+      sr.time = performance.now() - searchStart;
+      sr.count = res.results.length;
+      sr.tokens = estimateTokens(JSON.stringify(res));
+      sr.success = true;
+    } catch (e) {
+      sr.success = false;
+      sr.error = e.message;
+      sr.time = 0;
+      sr.count = 0;
+      sr.tokens = 0;
+    }
+    searchResults.push(sr);
+    console.log(`    ${sr.success ? '✅' : '❌'} ${sr.count} results in ${formatMs(sr.time)}`);
+  }
+
   await cheliped.close();
 
   // Print results
@@ -202,6 +236,21 @@ async function runBenchmark() {
     console.log(`- **${r.name}**: ${r.actionsNames}`);
   }
 
+  // Table 5: Search Performance
+  console.log('');
+  console.log('## Search Performance (free alternative to search APIs)');
+  console.log('');
+  console.log('| Engine | Query | Results | Time | Tokens | $/1k equiv |');
+  console.log('|--------|-------|---------|------|--------|------------|');
+  const apiCosts = { google: '$10 (WebSearch)', naver: 'N/A', bing: '$5 (Brave)', duckduckgo: '$0.8 (Tavily)' };
+  for (const sr of searchResults) {
+    if (!sr.success) {
+      console.log(`| ${sr.engine} | ${sr.query.slice(0, 20)} | ❌ | | | |`);
+      continue;
+    }
+    console.log(`| ${sr.engine} | ${sr.query.slice(0, 20)} | ${sr.count} | ${formatMs(sr.time)} | ${formatNumber(sr.tokens)} | **$0** vs ${apiCosts[sr.engine]} |`);
+  }
+
   // Summary
   console.log('');
   console.log('═'.repeat(70));
@@ -227,6 +276,21 @@ async function runBenchmark() {
     console.log(`  Total Nodes Found:   ${totalNodes}`);
     console.log(`  Total Actions Found: ${totalActions}`);
     console.log(`  Success Rate:        ${successResults.length}/${results.length} (${(successResults.length/results.length*100).toFixed(0)}%)`);
+
+    // Search summary
+    const successSearches = searchResults.filter(s => s.success);
+    if (successSearches.length > 0) {
+      const avgSearchTime = successSearches.reduce((sum, s) => sum + s.time, 0) / successSearches.length;
+      const avgSearchResults = successSearches.reduce((sum, s) => sum + s.count, 0) / successSearches.length;
+      const avgSearchTokens = successSearches.reduce((sum, s) => sum + s.tokens, 0) / successSearches.length;
+      console.log('');
+      console.log(`  --- Search ---`);
+      console.log(`  Avg Search Time:     ${formatMs(avgSearchTime)}`);
+      console.log(`  Avg Results/Query:   ${avgSearchResults.toFixed(1)}`);
+      console.log(`  Avg Tokens/Query:    ${formatNumber(Math.round(avgSearchTokens))}`);
+      console.log(`  Search Cost:         $0 (vs $5-10/1k with APIs)`);
+      console.log(`  Engines Tested:      ${successSearches.length}/${searchResults.length}`);
+    }
   }
 
   console.log('');
