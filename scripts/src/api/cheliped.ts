@@ -421,18 +421,37 @@ export class Cheliped {
       throw new Error(`Unsupported search engine: ${engine}. Use: google, naver, bing, duckduckgo`);
     }
 
-    await this.controller!.goto(url);
+    // Use networkIdle for search pages — results are rendered asynchronously
+    await this.controller!.goto(url, 'networkIdle');
+
+    // Wait for result elements to appear (up to 5s, 500ms intervals)
+    const readySelectors: Record<SearchEngine, string> = {
+      google: '#rso',
+      naver: '#main_pack',
+      bing: '#b_results',
+      duckduckgo: '.results',
+    };
+    const readySel = readySelectors[engine];
+    const transport = this.connection!.getTransport();
+    for (let i = 0; i < 10; i++) {
+      const check = await transport.send('Runtime.evaluate', {
+        expression: `!!document.querySelector('${readySel}')`,
+        returnByValue: true,
+      });
+      if ((check as { result?: { value?: boolean } })?.result?.value) break;
+      await new Promise(r => setTimeout(r, 500));
+    }
 
     const extractors: Record<SearchEngine, string> = {
       google: `(function() {
-        const items = [];
-        const seen = new Set();
+        var items = [];
+        var seen = new Set();
         document.querySelectorAll('.MjjYud, #search .g, #rso .g, #rso > div').forEach(function(g) {
-          const a = g.querySelector('a[href]');
-          const h3 = g.querySelector('h3');
-          const snippet = g.querySelector('.VwiC3b, [data-sncf], [style*="-webkit-line-clamp"]');
+          var a = g.querySelector('a[href]');
+          var h3 = g.querySelector('h3');
+          var snippet = g.querySelector('.VwiC3b, [data-sncf], [style*="-webkit-line-clamp"]');
           if (a && h3) {
-            const href = a.href;
+            var href = a.href;
             if (href && href.indexOf('google.') === -1 && !href.startsWith('/') && !seen.has(href)) {
               seen.add(href);
               items.push({
@@ -447,45 +466,79 @@ export class Cheliped {
       })()`,
 
       naver: `(function() {
-        const items = [];
-        const seen = new Set();
-        // Try modern Naver selectors first, then fallback
-        document.querySelectorAll('.lst_total .bx, .api_txt_lines, .total_wrap .sp_tl, .sc_new, [class*="total_group"]').forEach(function(el) {
-          const a = el.querySelector('a.api_txt_lines, a.link_tit, a.total_tit, a[href]');
-          const snippet = el.querySelector('.api_txt_lines.dsc_txt, .total_dsc, .dsc_txt, .api_txt_lines[class*="desc"]');
-          if (a && a.href && a.textContent.trim() && !seen.has(a.href)) {
+        var items = [];
+        var seen = new Set();
+        // Naver renders results in .sc_new sections
+        document.querySelectorAll('.sc_new').forEach(function(section) {
+          // Skip ad sections
+          if (section.querySelector('[class*="_ad_"], [class*="ads_"]')) return;
+          // Get all external links in this section
+          section.querySelectorAll('a[href]').forEach(function(a) {
+            var href = a.href;
+            if (!href || seen.has(href)) return;
+            // Skip naver internal (except blog/news/cafe), empty text, and UI links
+            var text = a.textContent.trim();
+            if (text.length < 5) return;
+            if (text === 'Keep에 저장' || text === '재시도') return;
+            var isNaverInternal = href.indexOf('naver.com') !== -1;
+            var isNaverContent = href.indexOf('blog.naver') !== -1 || href.indexOf('news.naver') !== -1 || href.indexOf('cafe.naver') !== -1;
+            if (isNaverInternal && !isNaverContent) return;
+            // Skip search result page links
+            if (href.indexOf('search.naver.com') !== -1) return;
+            seen.add(href);
+            items.push({
+              title: text.slice(0, 200),
+              url: href,
+              snippet: ''
+            });
+          });
+        });
+        // Also try .lst_total for older Naver layout
+        if (items.length === 0) {
+          document.querySelectorAll('.lst_total > li.bx').forEach(function(bx) {
+            if (bx.querySelector('.ad_tit, .alink')) return;
+            var a = bx.querySelector('a.link_tit, a.total_tit');
+            if (!a || !a.href || seen.has(a.href)) return;
             seen.add(a.href);
+            var snippet = bx.querySelector('.dsc_txt, .total_dsc');
             items.push({
               title: a.textContent.trim().slice(0, 200),
               url: a.href,
               snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
             });
-          }
-        });
-        // Fallback: extract all external links
-        if (items.length === 0) {
-          document.querySelectorAll('a[href]').forEach(function(a) {
-            const href = a.href;
-            if (href && href.indexOf('naver.com') === -1 && a.textContent.trim().length > 5 && !seen.has(href)) {
-              seen.add(href);
-              const parent = a.closest('li, .item, div');
-              const desc = parent ? parent.textContent.trim().slice(0, 300) : '';
-              items.push({ title: a.textContent.trim().slice(0, 200), url: href, snippet: desc });
-            }
           });
         }
         return items.slice(0, 20);
       })()`,
 
       bing: `(function() {
-        const items = [];
+        var items = [];
         document.querySelectorAll('#b_results .b_algo').forEach(function(el) {
-          const a = el.querySelector('h2 a');
-          const snippet = el.querySelector('.b_caption p, .b_lineclamp2');
-          if (a && a.href) {
+          var a = el.querySelector('h2 a');
+          var snippet = el.querySelector('.b_caption p, .b_lineclamp2');
+          if (a) {
+            // Decode Bing redirect URL: /ck/a?...&u=<base64url>...
+            var raw = a.getAttribute('href') || '';
+            var url = a.href;
+            if (raw.indexOf('/ck/') === 0) {
+              var m = raw.match(/[?&]u=a1([^&]+)/);
+              if (m) {
+                try { url = decodeURIComponent(m[1]); } catch(e) {}
+              }
+            }
+            // Also try cite element for clean URL
+            if (url.indexOf('bing.com/ck/') !== -1) {
+              var cite = el.querySelector('cite');
+              if (cite) {
+                var citeUrl = cite.textContent.trim().replace(/\\s.*$/, '');
+                if (citeUrl && citeUrl.indexOf('.') !== -1) {
+                  url = citeUrl.startsWith('http') ? citeUrl : 'https://' + citeUrl;
+                }
+              }
+            }
             items.push({
               title: a.textContent.trim(),
-              url: a.href,
+              url: url,
               snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
             });
           }
@@ -494,31 +547,40 @@ export class Cheliped {
       })()`,
 
       duckduckgo: `(function() {
-        const items = [];
-        document.querySelectorAll('.result, .results_links').forEach(function(el) {
-          const a = el.querySelector('a.result__a, a.result__url');
-          const snippet = el.querySelector('.result__snippet, a.result__snippet');
-          if (a && a.href) {
-            items.push({
-              title: a.textContent.trim(),
-              url: a.href,
-              snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
-            });
+        var items = [];
+        var seen = new Set();
+        document.querySelectorAll('.result.results_links, .result').forEach(function(el) {
+          var a = el.querySelector('a.result__a');
+          var snippet = el.querySelector('.result__snippet');
+          if (!a) return;
+          // Decode DuckDuckGo redirect: /l/?uddg=<encoded_url>&...
+          var raw = a.getAttribute('href') || '';
+          var url = a.href;
+          var m = raw.match(/uddg=([^&]+)/);
+          if (m) {
+            try { url = decodeURIComponent(m[1]); } catch(e) {}
           }
+          if (!url || seen.has(url)) return;
+          seen.add(url);
+          items.push({
+            title: a.textContent.trim(),
+            url: url,
+            snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+          });
         });
         return items.slice(0, 20);
       })()`,
     };
 
-    const result = await this.connection!.getTransport().send('Runtime.evaluate', {
+    const evalResult = await transport.send('Runtime.evaluate', {
       expression: extractors[engine],
       returnByValue: true,
     });
 
-    const results: SearchResultItem[] = (result as { result?: { value?: SearchResultItem[] } })?.result?.value ?? [];
+    const results: SearchResultItem[] = (evalResult as { result?: { value?: SearchResultItem[] } })?.result?.value ?? [];
 
     return {
-      success: true,
+      success: results.length > 0,
       engine,
       query,
       results,
