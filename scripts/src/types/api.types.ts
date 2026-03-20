@@ -41,7 +41,7 @@ export interface ActSemanticResult {
   actionType: string;
 }
 
-export type SearchEngine = 'google' | 'naver' | 'bing' | 'duckduckgo';
+export type SearchEngine = 'google' | 'naver' | 'bing' | 'duckduckgo' | 'baidu' | 'yandex' | 'yahoo_japan' | 'ecosia';
 
 export interface SearchResultItem {
   title: string;

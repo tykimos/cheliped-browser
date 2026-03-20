@@ -151,6 +151,10 @@ async function runBenchmark() {
     { engine: 'naver', query: '브라우저 자동화 AI' },
     { engine: 'bing', query: 'browser automation AI agent' },
     { engine: 'duckduckgo', query: 'browser automation AI agent' },
+    { engine: 'baidu', query: '浏览器自动化 AI' },
+    { engine: 'yandex', query: 'browser automation AI agent' },
+    { engine: 'yahoo_japan', query: 'ブラウザ自動化 AI' },
+    { engine: 'ecosia', query: 'browser automation AI agent' },
   ];
 
   const searchResults = [];
@@ -242,7 +246,7 @@ async function runBenchmark() {
   console.log('');
   console.log('| Engine | Query | Results | Time | Tokens | $/1k equiv |');
   console.log('|--------|-------|---------|------|--------|------------|');
-  const apiCosts = { google: '$10 (WebSearch)', naver: 'N/A', bing: '$5 (Brave)', duckduckgo: '$0.8 (Tavily)' };
+  const apiCosts = { google: '$10 (WebSearch)', naver: 'N/A', bing: '$5 (Brave)', duckduckgo: '$0.8 (Tavily)', baidu: 'N/A', yandex: 'N/A', yahoo_japan: 'N/A', ecosia: 'N/A' };
   for (const sr of searchResults) {
     if (!sr.success) {
       console.log(`| ${sr.engine} | ${sr.query.slice(0, 20)} | ❌ | | | |`);

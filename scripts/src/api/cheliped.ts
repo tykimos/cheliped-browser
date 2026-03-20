@@ -404,7 +404,7 @@ export class Cheliped {
 
   /**
    * Search the web using a real browser. Free alternative to search APIs.
-   * Supports Google, Naver, Bing, DuckDuckGo.
+   * Supports Google, Naver, Bing, DuckDuckGo, Baidu, Yandex, Yahoo Japan, Ecosia.
    */
   async search(query: string, engine: SearchEngine = 'google'): Promise<SearchResult> {
     this.ensureLaunched();
@@ -414,11 +414,15 @@ export class Cheliped {
       naver: `https://search.naver.com/search.naver?query=${encodeURIComponent(query)}`,
       bing: `https://www.bing.com/search?q=${encodeURIComponent(query)}`,
       duckduckgo: `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+      baidu: `https://www.baidu.com/s?wd=${encodeURIComponent(query)}`,
+      yandex: `https://yandex.ru/search/?text=${encodeURIComponent(query)}`,
+      yahoo_japan: `https://search.yahoo.co.jp/search?p=${encodeURIComponent(query)}`,
+      ecosia: `https://www.ecosia.org/search?q=${encodeURIComponent(query)}`,
     };
 
     const url = searchUrls[engine];
     if (!url) {
-      throw new Error(`Unsupported search engine: ${engine}. Use: google, naver, bing, duckduckgo`);
+      throw new Error(`Unsupported search engine: ${engine}. Use: google, naver, bing, duckduckgo, baidu, yandex, yahoo_japan, ecosia`);
     }
 
     // Use networkIdle for search pages — results are rendered asynchronously
@@ -430,6 +434,10 @@ export class Cheliped {
       naver: '#main_pack',
       bing: '#b_results',
       duckduckgo: '.results',
+      baidu: '#content_left',
+      yandex: '.serp-list',
+      yahoo_japan: '#contents',
+      ecosia: '.results',
     };
     const readySel = readySelectors[engine];
     const transport = this.connection!.getTransport();
@@ -564,6 +572,125 @@ export class Cheliped {
           seen.add(url);
           items.push({
             title: a.textContent.trim(),
+            url: url,
+            snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+          });
+        });
+        return items.slice(0, 20);
+      })()`,
+
+      baidu: `(function() {
+        var items = [];
+        var seen = new Set();
+        document.querySelectorAll('#content_left .result, #content_left .c-container').forEach(function(el) {
+          var a = el.querySelector('h3 a, .c-title a');
+          var snippet = el.querySelector('.c-abstract, .content-right_8Zs40, .c-span-last');
+          if (!a || !a.href) return;
+          var url = a.href;
+          // Baidu uses redirect URLs like baidu.com/link?url=...
+          // The actual URL is only available after click, so we keep the redirect
+          // but prefer any visible URL from cite/span
+          var cite = el.querySelector('.c-showurl, cite, [class*="source"]');
+          if (cite) {
+            var citeText = cite.textContent.trim().split(/\\s/)[0];
+            if (citeText && citeText.indexOf('.') !== -1 && citeText.indexOf('baidu') === -1) {
+              url = citeText.startsWith('http') ? citeText : 'https://' + citeText;
+            }
+          }
+          if (seen.has(url)) return;
+          seen.add(url);
+          items.push({
+            title: a.textContent.trim(),
+            url: url,
+            snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+          });
+        });
+        return items.slice(0, 20);
+      })()`,
+
+      yandex: `(function() {
+        var items = [];
+        var seen = new Set();
+        document.querySelectorAll('.serp-item').forEach(function(el) {
+          var a = el.querySelector('a.OrganicTitle-Link, a[class*="Title"], h2 a');
+          var snippet = el.querySelector('.OrganicTextContentSpan, .TextContainer, [class*="Organic"] [class*="Text"]');
+          if (!a || !a.href) return;
+          var url = a.href;
+          // Yandex sometimes uses yabs.yandex redirect
+          if (url.indexOf('yabs.yandex') !== -1) {
+            var cite = el.querySelector('[class*="Path"] a, .OrganicPath a');
+            if (cite && cite.href) url = cite.href;
+          }
+          if (seen.has(url) || url.indexOf('yandex.') !== -1) return;
+          seen.add(url);
+          items.push({
+            title: a.textContent.trim(),
+            url: url,
+            snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+          });
+        });
+        return items.slice(0, 20);
+      })()`,
+
+      yahoo_japan: `(function() {
+        var items = [];
+        var seen = new Set();
+        document.querySelectorAll('#contents .sw-Card, #web .w, .algo').forEach(function(el) {
+          var a = el.querySelector('a[href]');
+          var h3 = el.querySelector('h3, .sw-Card__title, .hd a');
+          var snippet = el.querySelector('.sw-Card__description, .dd, p');
+          if (!a || !h3) return;
+          var url = a.href;
+          // Yahoo Japan uses redirect URLs like search.yahoo.co.jp/r/...
+          if (url.indexOf('search.yahoo.co.jp/r/') !== -1) {
+            // Try to get real URL from data attribute or visible URL
+            var dataUrl = a.getAttribute('data-url') || a.getAttribute('data-href');
+            if (dataUrl) url = dataUrl;
+          }
+          if (seen.has(url) || url.indexOf('yahoo.co.jp') !== -1) return;
+          seen.add(url);
+          items.push({
+            title: h3.textContent.trim(),
+            url: url,
+            snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
+          });
+        });
+        // Broader fallback
+        if (items.length === 0) {
+          document.querySelectorAll('#contents a[href]').forEach(function(a) {
+            var href = a.href;
+            if (!href || seen.has(href)) return;
+            if (href.indexOf('yahoo.co.jp') !== -1) return;
+            if (a.textContent.trim().length < 10) return;
+            seen.add(href);
+            items.push({ title: a.textContent.trim().slice(0, 200), url: href, snippet: '' });
+          });
+        }
+        return items.slice(0, 20);
+      })()`,
+
+      ecosia: `(function() {
+        var items = [];
+        var seen = new Set();
+        document.querySelectorAll('.result').forEach(function(el) {
+          var h3 = el.querySelector('h2, h3, .result-title');
+          if (!h3) return;
+          // Find the actual result link (skip ecosia/google UI links)
+          var links = el.querySelectorAll('a[href]');
+          var a = null;
+          for (var i = 0; i < links.length; i++) {
+            var href = links[i].href;
+            if (href.indexOf('ecosia.org') === -1 && href.indexOf('google.com') === -1 && href.indexOf('://') !== -1) {
+              a = links[i]; break;
+            }
+          }
+          if (!a) return;
+          var url = a.href;
+          if (seen.has(url)) return;
+          seen.add(url);
+          var snippet = el.querySelector('.result-snippet, p');
+          items.push({
+            title: h3.textContent.trim(),
             url: url,
             snippet: snippet ? snippet.textContent.trim().slice(0, 300) : ''
           });

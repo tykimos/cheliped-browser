@@ -228,7 +228,7 @@ async function executeCommand(cheliped, cmdObj) {
       const query = args[0];
       const engine = args[1] || 'google';
       if (!query) throw new Error('search: 검색어가 필요합니다.');
-      const validEngines = ['google', 'naver', 'bing', 'duckduckgo'];
+      const validEngines = ['google', 'naver', 'bing', 'duckduckgo', 'baidu', 'yandex', 'yahoo_japan', 'ecosia'];
       if (!validEngines.includes(engine)) {
         throw new Error(`search: 엔진은 ${validEngines.join(', ')} 중 하나. 받은 값: ${engine}`);
       }

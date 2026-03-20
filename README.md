@@ -410,7 +410,7 @@ node scripts/cheliped-cli.mjs '[{"cmd":"<command>","args":["..."]}]'
 | `download` | `["url", "path"]` | Download file by direct URL |
 | `download-click` | `["agentId", "path", "timeout"]` | Click element to trigger download |
 | `download-js` | `["jsExpr", "path", "timeout"]` | Run JS to trigger download |
-| `search` | `["query", "engine"]` | Web search via Chrome — free alternative to search APIs. Engines: `google`, `naver`, `bing`, `duckduckgo` |
+| `search` | `["query", "engine"]` | Web search via Chrome — free alternative to search APIs. Engines: `google`, `naver`, `bing`, `duckduckgo`, `baidu`, `yandex`, `yahoo_japan`, `ecosia` |
 | `monitor` | `["port"]` | Start real-time browser viewer (default port 19222) |
 | `monitor-stop` | — | Stop the monitor viewer |
 | `close` | — | Kill Chrome, delete session |
@@ -630,6 +630,18 @@ node scripts/cheliped-cli.mjs '[{"cmd":"search","args":["브라우저 자동화"
 
 # DuckDuckGo (most automation-friendly)
 node scripts/cheliped-cli.mjs '[{"cmd":"search","args":["browser automation","duckduckgo"]}]'
+
+# Baidu (China)
+node scripts/cheliped-cli.mjs '[{"cmd":"search","args":["浏览器自动化","baidu"]}]'
+
+# Yandex (Russia)
+node scripts/cheliped-cli.mjs '[{"cmd":"search","args":["browser automation","yandex"]}]'
+
+# Yahoo Japan
+node scripts/cheliped-cli.mjs '[{"cmd":"search","args":["ブラウザ自動化","yahoo_japan"]}]'
+
+# Ecosia (eco-friendly)
+node scripts/cheliped-cli.mjs '[{"cmd":"search","args":["browser automation","ecosia"]}]'
 ```
 
 <details>
@@ -657,7 +669,7 @@ node scripts/cheliped-cli.mjs '[{"cmd":"search","args":["browser automation","du
 
 </details>
 
-> **Cost comparison**: Google search via Cheliped = **$0** vs WebSearch API = $10/1k queries, Brave = $5/1k, Tavily = $0.8/query. Supports 4 engines: `google`, `naver`, `bing`, `duckduckgo`.
+> **Cost comparison**: Google search via Cheliped = **$0** vs WebSearch API = $10/1k queries, Brave = $5/1k, Tavily = $0.8/query. Supports 8 engines: `google`, `naver`, `bing`, `duckduckgo`, `baidu`, `yandex`, `yahoo_japan`, `ecosia`.
 
 ### Run Multiple Agents
 
@@ -746,7 +758,7 @@ node scripts/cheliped-cli.mjs --session shopping '[{"cmd":"goto","args":["https:
 | **File upload** | No | No | No | Yes | Yes | Yes |
 | **Cookie CRUD** | No | No | No | Yes | Yes | Yes |
 | **JS evaluate** | `runJs()` | `/execute-js` | No | `page.evaluate()` | `page.evaluate()` | Scoped evaluate |
-| **Web search** | Built-in (4 engines, $0) | No | No | No | No | No |
+| **Web search** | Built-in (8 engines, $0) | No | No | No | No | No |
 
 #### When to Use Which
 
@@ -1089,25 +1101,29 @@ node benchmark-compare.mjs      # Token efficiency & speed (6 sites)
 node benchmark-quality.mjs      # Content recognition quality (6 sites)
 node benchmark-limitations.mjs  # Edge cases & limitations (10 sites)
 node benchmark-challenge.mjs    # Challenge benchmark (14 complex sites)
-node benchmark.mjs              # Full benchmark with search (5 sites + 4 engines)
+node benchmark.mjs              # Full benchmark with search (5 sites + 8 engines)
 ```
 
 </details>
 
 ### Search Benchmark — Free Alternative to Search APIs
 
-> Tested 4 search engines with structured result extraction via Chrome · 2026-03-20
+> Tested 8 search engines with structured result extraction via Chrome · 2026-03-20
 
-| Engine | Results | Time | Tokens | API Cost Saved |
-|:-------|--------:|-----:|-------:|:---------------|
-| Google | 9 | 30.7s | 655 | $10/1k (WebSearch) |
-| Naver | 10 | 4.9s | 436 | N/A |
-| Bing | 10 | 18.2s | 1,266 | $5/1k (Brave) |
-| DuckDuckGo | 10 | 12.5s | 1,022 | $0.8/query (Tavily) |
+| Engine | Country | Results | Time | Tokens | API Cost Saved |
+|:-------|:--------|--------:|-----:|-------:|:---------------|
+| Google | Global | 9 | 1.5s | 655 | $10/1k (WebSearch) |
+| Naver | Korea | 20 | 2.5s | 673 | N/A |
+| Bing | Global | 10 | 30.2s | 682 | $5/1k (Brave) |
+| DuckDuckGo | Global | 10 | 2.4s | 708 | $0.8/query (Tavily) |
+| Baidu | China | 14 | 5.2s | 2,833 | N/A |
+| Yandex | Russia | 14 | 31.5s | 699 | N/A |
+| Yahoo Japan | Japan | 10 | 2.4s | 625 | N/A |
+| Ecosia | Europe | 10 | 35.6s | 715 | N/A |
 
-**Summary**: Avg **9.8 results/query** · **845 tokens/query** · **$0 cost** vs $5-10/1k with paid APIs
+**Summary**: Avg **12.1 results/query** · **949 tokens/query** · **$0 cost** vs $5-10/1k with paid APIs
 
-> **Trade-off**: Search via Chrome is slower than API calls (5-30s vs 200-500ms) but completely free. Best suited for AI agents that search occasionally, not bulk SERP scraping. DuckDuckGo is most automation-friendly; Naver is fastest.
+> **Trade-off**: Search via Chrome is slower than API calls (1-35s vs 200-500ms) but completely free. Best suited for AI agents that search occasionally, not bulk SERP scraping. Google/Naver/DuckDuckGo/Yahoo Japan are fastest (~2s); Bing/Yandex/Ecosia are slower (~30s).
 
 ---
 
