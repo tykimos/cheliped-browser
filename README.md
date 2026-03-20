@@ -509,7 +509,8 @@ const cheliped = new Cheliped({
   headless: true,
   compression: {
     enabled: true,          // Enable token compression pipeline
-    maxTextLength: 512,     // Max characters per text element (default: 512)
+    maxTextLength: 200,     // Max characters per text element (default: 200)
+    maxTexts: 80,           // Max text elements to keep, headings always kept (default: 80)
     maxLinks: 500,          // Max link elements to keep (default: 5000)
     maxImages: 10,          // Max image elements to keep (default: 10)
     maxListItems: 30,       // Max consecutive same-category items (default: 30)
@@ -530,11 +531,12 @@ Controls how much of each text element is preserved. Higher values capture more 
 | 64 | 9,520 | 76.2% | Minimal token budget, navigation-only tasks |
 | 128 | 10,103 | 80.7% | Quick page scanning |
 | 256 | 10,653 | 81.9% | Balanced for most sites |
-| **512** (default) | **11,002** | **82.9%** | **Recommended — good balance** |
-| 1024 | 11,212 | 83.6% | Content-heavy pages (Wikipedia, docs) |
+| **200** (default) | **~2,000** | **~80%** | **Recommended — good balance** |
+| 512 | ~3,000 | 82.9% | Content-heavy pages (Wikipedia, docs) |
+| 1024 | 11,212 | 83.6% | Maximum content (reference pages) |
 | 2048 | 11,294 | 83.6% | Maximum recall (diminishing returns) |
 
-**Per-site impact:** The effect varies by content density. Wikipedia gains +12% recall going from 64→512, while Hacker News is already 100% at 64.
+**Per-site impact:** The effect varies by content density. Wikipedia gains +12% recall going from 64→200, while Hacker News is already 100% at 64.
 
 ![Text Recall by Site](docs/images/config-recall-persite.png)
 
@@ -562,7 +564,7 @@ Controls how many unique links are included in the Agent DOM.
 { maxTextLength: 64, maxLinks: 50 }      // ~5,000 tokens avg
 
 // Balanced (default) — good quality/cost ratio
-{ maxTextLength: 512, maxLinks: 500 }    // ~11,000 tokens avg
+{ maxTextLength: 200, maxTexts: 80, maxLinks: 500 }  // ~2,000 tokens avg
 
 // Maximum — highest recall
 { maxTextLength: 2048, maxLinks: 5000 }  // ~14,000 tokens avg

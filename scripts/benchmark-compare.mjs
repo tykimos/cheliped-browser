@@ -52,7 +52,7 @@ async function benchCheliped(targets) {
 
   const cheliped = new Cheliped({
     headless: true,
-    compression: { enabled: true, maxTextLength: 512, maxLinks: 50 },
+    compression: { enabled: true, maxTextLength: 200, maxLinks: 50 },
   });
 
   const launchStart = performance.now();

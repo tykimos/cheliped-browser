@@ -146,7 +146,7 @@ async function testCheliped(targets) {
 
   const cheliped = new Cheliped({
     headless: true,
-    compression: { enabled: true, maxTextLength: 512, maxLinks: 500 },
+    compression: { enabled: true, maxTextLength: 200, maxLinks: 500 },
   });
   await cheliped.launch();
 
