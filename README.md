@@ -25,6 +25,160 @@ Cheliped is a **browser automation skill** for AI agents. It controls Chrome via
 
 ---
 
+## 🏗 Architecture
+
+```
+cheliped-browser/
+├── SKILL.md                    # Skill definition
+├── LICENSE.txt                 # MIT
+└── scripts/
+    ├── cheliped-cli.mjs        # CLI entry point
+    ├── src/
+    │   ├── api/                # Cheliped class — main API
+    │   ├── cdp/                # CDP connection + transport + launcher
+    │   ├── dom/                # Agent DOM builder, extractor, compressor
+    │   ├── graph/              # UI graph + semantic action generator
+    │   ├── security/           # Domain allowlist, prompt guard
+    │   └── session/            # Cookie persistence
+    ├── tests/                  # Unit + integration tests
+    └── examples/               # Demo scripts
+```
+
+### Agent DOM Pipeline
+
+The core concept of Cheliped is the **Agent DOM** — a compressed, LLM-friendly representation of a web page. Here's how a raw DOM tree is transformed into an Agent DOM:
+
+```mermaid
+flowchart LR
+    subgraph Chrome["Chrome (CDP)"]
+        DOM["Raw DOM Tree\n~130K tokens"]
+        IFrame["iframe Content"]
+    end
+
+    subgraph Pipeline["Agent DOM Pipeline"]
+        EXT["DomExtractor\nFull tree + iframes\n(parallel extraction)"]
+        FIL["DomFilter\nRemove hidden,\nscript, style"]
+        SEM["SemanticExtractor\nCategorize:\nbutton, link,\ninput, text..."]
+        CMP["TokenCompressor\nTruncate text,\nlimit counts"]
+        BLD["AgentDomBuilder\nAssign agentId\n→ backendNodeId\nmapping"]
+    end
+
+    subgraph Output["Agent DOM (~2.5K tokens)"]
+        JSON["buttons: [{id:3, text}]\nlinks: [{id:6, href}]\ninputs: [{id:5, type}]\ntexts: [{id:8, text}]"]
+    end
+
+    DOM --> EXT
+    IFrame -.-> EXT
+    EXT --> FIL --> SEM --> CMP --> BLD --> JSON
+
+    style Chrome fill:#f8f9fa,stroke:#dee2e6,color:#212529
+    style Pipeline fill:#e9ecef,stroke:#adb5bd,color:#212529
+    style Output fill:#d4edda,stroke:#28a745,color:#212529
+```
+
+### Observe-Act Loop & ID Mapping
+
+The agent interacts with pages through a simple **observe → act → observe** loop. The key mechanism is the `agentId ↔ backendNodeId` mapping:
+
+```mermaid
+flowchart TB
+    subgraph Agent["AI Agent (LLM)"]
+        OBS["observe()"]
+        ACT["act(agentId, action)"]
+        REASON["Reason about\nAgent DOM JSON"]
+    end
+
+    subgraph Cheliped["Cheliped Core"]
+        ADOM["AgentDomBuilder\nidMap: agentId → backendNodeId"]
+        RESOLVE["resolveAgentId(3)\n→ backendNodeId: 847"]
+        CTRL["BrowserController\nclick / fill / select\nby backendNodeId"]
+    end
+
+    subgraph CDP["Chrome DevTools Protocol"]
+        DOMAPI["DOM.getDocument\nDOM.getBoxModel\nDOM.resolveNode"]
+        INPUT["Input.dispatchMouseEvent\nInput.insertText\nDOM.focus"]
+    end
+
+    OBS --> ADOM
+    ADOM -->|"Agent DOM JSON\n{buttons:[{id:3,...}]}"| REASON
+    REASON -->|"click 3"| ACT
+    ACT --> RESOLVE
+    RESOLVE --> CTRL
+    CTRL --> DOMAPI
+    CTRL --> INPUT
+    INPUT -->|"Page state changed"| OBS
+
+    style Agent fill:#fff3cd,stroke:#ffc107,color:#212529
+    style Cheliped fill:#cce5ff,stroke:#0d6efd,color:#212529
+    style CDP fill:#f8f9fa,stroke:#6c757d,color:#212529
+```
+
+### Element Category Classification
+
+The semantic extractor classifies DOM elements into 8 categories. Only non-empty categories are included in the output (token optimization):
+
+```mermaid
+flowchart LR
+    subgraph HTML["HTML Elements"]
+        BTN["button\n[role=button]"]
+        A["a[href]\n[role=link]"]
+        INP["input\n[role=textbox]\n[role=checkbox]"]
+        SEL["select"]
+        TA["textarea"]
+        FORM["form"]
+        TXT["h1-h6, p, li\nlabel, span, td"]
+        IMG["img"]
+    end
+
+    subgraph AgentDom["Agent DOM Categories"]
+        B["buttons[]"]
+        L["links[]"]
+        I["inputs[]"]
+        S["selects[]"]
+        T2["textareas[]"]
+        F["forms[]"]
+        TX["texts[]"]
+        IM["images[]"]
+    end
+
+    BTN --> B
+    A --> L
+    INP --> I
+    SEL --> S
+    TA --> T2
+    FORM --> F
+    TXT --> TX
+    IMG --> IM
+
+    style HTML fill:#f8f9fa,stroke:#dee2e6,color:#212529
+    style AgentDom fill:#d4edda,stroke:#28a745,color:#212529
+```
+
+---
+
+## ⚡ At a Glance
+
+> Avg **1,932 tokens** per page · **33ms** observe speed · **88.9%** quality score
+
+| | Cheliped | OpenClaw Browser | Tandem Browser | agent-browser | Playwright | Puppeteer |
+|:--|:---------|:-----------------|:---------------|:--------------|:-----------|:----------|
+| **Best for** | LLM agent browsing | Full-featured agent platform | Human-AI co-browsing | CLI automation | Full browser testing | Headless scripting |
+| **Avg Tokens** | **2,198** | 16,762 (4,251 efficient) | 10,631 | 11,802 | 5,672 | 5,020 |
+| **Avg Speed** | **33ms** | 1,280ms | 81ms | 208ms | 69ms | 63ms |
+| **Quality** | **88.9%** | — | — | 72.9% | 75.6% | 73.7% |
+| **Output Format** | Structured JSON (categorized arrays) | YAML accessibility tree | Indented AXTree text | Raw text | Flat a11y tree | Flat a11y tree |
+| **Element IDs** | Numeric `agentId` | Symbolic `[ref=eN]` | `@ref` labels (`@e1`) | None | CSS selectors | CSS selectors |
+| **Dependencies** | ws only | playwright-core | Electron + CDP | Rust binary | Full framework | Full framework |
+| **iframe/Shadow DOM** | Same-origin only | Full (via Playwright) | Via Electron | No | Partial | Partial |
+| **SPA Support** | Basic | Excellent | Good | Basic | Excellent | Good |
+| **Wait Strategy** | Network idle | Auto-wait (Playwright) | MutationObserver settling | Manual | Auto-wait | Manual |
+| **Security Model** | Domain allowlist | None | 6-layer (network, JS AST, behavior) | None | None | None |
+| **Production Maturity** | Early | Production | Developer Preview | Stable | Mature | Mature |
+
+*For detailed benchmarks, see [Full Benchmark Results](#-full-benchmark-results) below.*
+
+---
+
 ## 🤖 Why Claude Code & OpenClaw?
 
 Cheliped is not a general-purpose browser automation library. It is a **skill** — purpose-built for AI agent platforms that need to browse the web as part of larger tasks. Here's why the design fits Claude Code and OpenClaw specifically:
@@ -129,194 +283,6 @@ Cheliped abstracts away browser complexity so the LLM can focus on **what to do*
 3. **Numeric IDs over selectors** — LLMs are better at referencing `id: 3` than constructing `div.container > form > button:first-child`. Selectors break on DOM changes; numeric IDs are always valid after the latest `observe`.
 4. **JSON in, JSON out** — No parsing ambiguity. The LLM sends JSON commands and receives JSON results. No regex needed, no text scraping.
 5. **Zero-config for agents** — First call auto-launches Chrome. No setup step needed in the agent's workflow. Just `goto` and go.
-
----
-
-## ⚖️ How Does It Compare?
-
-> Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2026-03-20 · v0.2.1
-
-| | Cheliped | OpenClaw Browser | Tandem Browser | agent-browser | Playwright | Puppeteer |
-|:--|:---------|:-----------------|:---------------|:--------------|:-----------|:----------|
-| **Best for** | LLM agent browsing | Full-featured agent platform | Human-AI co-browsing | CLI automation | Full browser testing | Headless scripting |
-| **Avg Tokens** | **2,198** | 16,762 (4,251 efficient) | 10,631 | 11,802 | 5,672 | 5,020 |
-| **Avg Speed** | **33ms** | 1,280ms | 81ms | 208ms | 69ms | 63ms |
-| **Quality** | **88.9%** | — | — | 72.9% | 75.6% | 73.7% |
-| **Output Format** | Structured JSON (categorized arrays) | YAML accessibility tree | Indented AXTree text | Raw text | Flat a11y tree | Flat a11y tree |
-| **Element IDs** | Numeric `agentId` | Symbolic `[ref=eN]` | `@ref` labels (`@e1`) | None | CSS selectors | CSS selectors |
-| **Dependencies** | ws only | playwright-core | Electron + CDP | Rust binary | Full framework | Full framework |
-| **iframe/Shadow DOM** | Same-origin only | Full (via Playwright) | Via Electron | No | Partial | Partial |
-| **SPA Support** | Basic | Excellent | Good | Basic | Excellent | Good |
-| **Wait Strategy** | Network idle | Auto-wait (Playwright) | MutationObserver settling | Manual | Auto-wait | Manual |
-| **Security Model** | Domain allowlist | None | 6-layer (network, JS AST, behavior) | None | None | None |
-| **Production Maturity** | Early | Production | Developer Preview | Stable | Mature | Mature |
-
-### Detailed Comparison — All Tools
-
-#### Architecture
-
-| | Cheliped | Tandem Browser | agent-browser | Playwright | Puppeteer | OpenClaw Browser |
-|:--|:---------|:---------------|:--------------|:-----------|:----------|:-----------------|
-| **Runtime** | Headless Chrome (spawned) | Electron app (GUI) | Rust binary + Chrome | Node.js + Chromium | Node.js + Chrome | Playwright over Chrome |
-| **Protocol** | Direct CDP WebSocket | Electron DevTools → CDP | Direct CDP | CDP via abstraction | CDP via abstraction | Playwright over CDP |
-| **API style** | CLI / JS library | HTTP REST API (127.0.0.1:8765) | CLI commands | JS library | JS library | HTTP REST API via gateway |
-| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | CDP `Accessibility.getFullAXTree()` → compact filter → `@ref` labels | CDP AXTree | `ariaSnapshot()` | `accessibility.snapshot()` | Playwright `ariaSnapshot()` / `_snapshotForAI()` |
-| **Human-in-the-loop** | No | Yes (Wingman panel, captcha detection) | No | No | No | No |
-| **Security** | Domain allowlist + prompt guard | 6-layer (network, JS AST, behavior) | None | None | None | None |
-
-#### Output Format
-
-**Cheliped (Agent DOM)** — Structured JSON with categorized arrays:
-```json
-{
-  "texts": [{"agentId": 1, "tag": "h1", "text": "Example Domain"}],
-  "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
-  "buttons": [], "inputs": []
-}
-```
-
-**OpenClaw (AI Snapshot)** — YAML-like accessibility tree with ref tokens:
-```yaml
-- heading "Example Domain" [level=1] [ref=e3]
-- paragraph: This domain is for use in documentation examples...
-- link "Learn more" [ref=e6] [cursor=pointer]:
-  - /url: https://iana.org/domains/example
-```
-
-**Tandem (AXTree Snapshot)** — Indented accessibility tree with `@ref` labels:
-```
-- WebArea "Example Domain" [@e1]
-  - heading "Example Domain" [@e2]
-  - paragraph "This domain is for use..." [@e3]
-  - link "More information..." [@e4]
-```
-
-**Playwright (Aria Snapshot)** — YAML-like flat tree:
-```yaml
-- heading "Example Domain" [level=1]
-- paragraph: This domain is for use in...
-- link "More information..."
-```
-
-**Puppeteer (Accessibility Snapshot)** — JSON tree with roles:
-```json
-{"role": "WebArea", "name": "Example Domain", "children": [
-  {"role": "heading", "name": "Example Domain", "level": 1},
-  {"role": "link", "name": "More information..."}
-]}
-```
-
-#### Feature Comparison
-
-| Feature | Cheliped | Tandem | agent-browser | Playwright | Puppeteer | OpenClaw |
-|:--------|:---------|:-------|:--------------|:-----------|:----------|:---------|
-| **Element IDs** | Numeric `agentId` | `@ref` (`@e1`) | None | CSS selectors | CSS selectors | Symbolic `[ref=eN]` |
-| **Click/Fill** | By agentId | By @ref | N/A | By locator | By selector | By ref |
-| **Human typing** | `fillHuman()` | BehaviorReplay | N/A | N/A | N/A | N/A |
-| **Enterprise framework** | WebSquare auto-detect | No | No | No | No | No |
-| **Korean IME** | `Input.insertText` | Unknown | No | `type()` | `type()` | No |
-| **Content extraction** | Semantic DOM pipeline | Structured by page type | Raw text | A11y tree | A11y tree | YAML a11y tree |
-| **Captcha detection** | No | Auto-detect + show | No | No | No | No |
-| **Stealth patches** | No | Yes | No | No | No | No |
-| **Session isolation** | User data dir | X-Session + partition | No | Browser context | Browser context | Playwright context |
-| **Multi-tab** | No | Yes (250+ endpoints) | No | Yes | Yes | Yes |
-| **Dialog handling** | No | No | No | Yes | Yes | Yes |
-| **File upload** | No | No | No | Yes | Yes | Yes |
-| **Cookie CRUD** | No | No | No | Yes | Yes | Yes |
-| **JS evaluate** | `runJs()` | `/execute-js` | No | `page.evaluate()` | `page.evaluate()` | Scoped evaluate |
-
-#### When to Use Which
-
-| Scenario | Recommended | Why |
-|:---------|:-----------|:----|
-| **Quick page scan** | Cheliped | Fastest extraction (44ms), fewest tokens (2,588) |
-| **Complex SPA interaction** | Playwright | Full auto-wait, robust locator API |
-| **Structured data extraction** | Cheliped | Categorized arrays (texts/links/buttons/inputs) are immediately parseable |
-| **Lightweight skill integration** | Cheliped | Zero framework deps (ws only), self-contained CLI |
-| **Secure human-AI browsing** | Tandem | 6-layer security, captcha detection, human-in-the-loop |
-| **Human + AI co-browsing** | Tandem | Wingman panel, persistent messenger panels, shared live workflow |
-| **Browser testing / E2E** | Playwright | Mature framework, auto-wait, trace recording |
-| **Headless scripting** | Puppeteer | Google-backed, lightweight, well-documented |
-
-### OpenClaw Internal Browser — Separate Comparison
-
-OpenClaw's internal browser runs as an HTTP gateway service (not a standalone library), so it is benchmarked separately against Cheliped.
-
-#### Architecture
-
-| | Cheliped | OpenClaw Browser |
-|:--|:---------|:-----------------|
-| **Protocol** | Direct CDP WebSocket (raw) | Playwright over CDP |
-| **Browser launch** | Self-managed headless Chrome | Attached to running Chrome instance |
-| **API style** | CLI JSON commands / JS library | HTTP REST API via gateway |
-| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | Playwright `ariaSnapshot()` / `_snapshotForAI()` |
-
-#### Output Format
-
-**OpenClaw (AI Snapshot)** — YAML-like accessibility tree with ref tokens:
-```yaml
-- heading "Example Domain" [level=1] [ref=e3]
-- paragraph: This domain is for use in documentation examples...
-- link "Learn more" [ref=e6] [cursor=pointer]:
-  - /url: https://iana.org/domains/example
-```
-
-#### Token Output & Speed
-
-![Cheliped vs OpenClaw: Tokens](docs/images/benchmark-openclaw-tokens.png)
-
-| Site | Cheliped | OpenClaw (full) | OpenClaw (efficient) | Cheliped Speed | OpenClaw Speed |
-|:-----|--------:|----------------:|--------------------:|--------------:|--------------:|
-| Hacker News | **7,812** | 26,396 | **264** | **13ms** | 1,812ms |
-| Wikipedia | **23,104** | 31,656 | 12,177 | **60ms** | 1,219ms |
-| GitHub | **6,698** | 8,424 | 2,465 | **21ms** | 1,153ms |
-| Example.com | 146 | 188 | **85** | **1ms** | 1,033ms |
-| MDN Web Docs | **7,639** | 9,394 | 2,688 | **9ms** | 1,187ms |
-| BBC | **4,458** | 24,511 | 7,828 | 370ms | 1,278ms |
-| **Average** | **8,310** | **16,762** | **4,251** | **79ms** | **1,280ms** |
-
-![Cheliped vs OpenClaw: Speed](docs/images/benchmark-openclaw-speed.png)
-
-> OpenClaw's efficient mode (`interactive=true` + `compact=true` + `maxDepth=6`) achieves the lowest token count (4,251 avg) by returning only interactive elements. However, it runs 16x slower (1,280ms) due to the Playwright abstraction layer.
-
-### Performance at a Glance
-
-![Benchmark Summary](docs/images/benchmark-summary.png)
-
-![Quality Breakdown](docs/images/benchmark-quality-breakdown.png)
-
-### Strengths
-
-- **2–4x fewer tokens** than all competitors — directly reduces LLM API costs
-- **Fastest extraction (44ms avg)** — 2–5x faster than alternatives via direct CDP
-- **Best content recognition (88.9%)** — highest recall on links, buttons, inputs, headings
-- **Text deduplication** — removes duplicate text elements from nested containers (e.g. `<td><span>`)  while preserving headings
-- **Agent DOM** — purpose-built for LLM agents: numbered interactive elements with semantic grouping
-- **Zero framework dependencies** — just `ws` for WebSocket, no Playwright/Puppeteer required
-- **Same-origin iframe extraction** — merges iframe content into main Agent DOM (CDP-based)
-- **Smart link deduplication** — keeps best text per URL, reduces noise on link-heavy pages
-- **Fast extract() path** — `extract('text')` and `extract('links')` use lightweight JS evaluation, bypassing the full DOM pipeline (14ms vs 1,100ms+ on heavy pages)
-- **React/SPA fill** — native input value setters bypass synthetic event systems
-- **WebSquare/enterprise framework support** — auto-detects WebSquare and uses native `setValue()` API to update both DOM and framework internal state. Tested on g2b.go.kr (Korean government procurement)
-- **Korean IME input** — `Input.insertText` handles Korean composition correctly, unlike `dispatchKeyEvent`
-- **CSS selector commands** — `fill-selector`, `click-selector`, `focus-selector`, `type`, `press-key` for direct element interaction without agentId
-- **Session persistence** — Chrome stays alive between agent invocations, no restart overhead
-- **Concurrent sessions** — multiple agents browse independently with `--session`
-
-### Known Limitations
-
-Tested on 10 edge-case sites (NPM, Reddit, YouTube, Twitter/X, Google, Stack Overflow, MDN API, W3Schools, JSONPlaceholder, HTTPBin):
-
-- **Cross-origin iframe / Shadow DOM blind spot** — HTTPBin (Swagger UI in cross-origin iframe): buttons 0/11, inputs 0/1, headings 2/13. Same-origin iframes are now extracted, but cross-origin and shadow roots remain invisible. Playwright has the same limitation via ariaSnapshot.
-- **Link cap on large pages** — `maxLinks: 5000` but link dedup caps at first occurrence per href. MDN API: 500/1,230 unique links. Configurable but adds tokens.
-- **Over-detection on JS-heavy pages** — NPM search: GT reports 2 links (pre-render) but Cheliped finds 105 (post-render). This is actually more accurate, but inflates token count (3,865 tok vs Playwright's 2 tok).
-- **Heavy SPA navigation is slow** — Twitter/X, YouTube: all tools are slow on auth-walled SPAs.
-- **Heading under-detect on complex pages** — MDN API: 24/52 headings detected (46%). Heading dedup removes duplicates but some unique headings in deeply nested structures are missed. Headings wrapped in links (`<a><h2>...</h2></a>`) are now detected with the `tag` field preserved on the link element.
-- **Slow `observe()` on heavy pages** — eBay, CNN, Naver: 1–1.7s due to `DOM.getDocument`. Use `extract('text')` or `extract('links')` for 5–365x faster extraction when full Agent DOM isn't needed.
-- **Bot detection** — Amazon, Booking.com serve CAPTCHA to headless Chrome. Use `headless: false` or session cookies.
-- **Small SPA token overhead** — TodoMVC (655 tok raw): Cheliped 521 tok vs Puppeteer 388 tok. Structured JSON overhead is minimal on tiny pages.
-- **Early-stage project** — not yet battle-tested in production. Playwright and Puppeteer have years of maturity.
-- **Benchmark caveats**: token estimation uses `chars/4` (not tiktoken); Playwright/Puppeteer benchmarked via a11y snapshots, not their primary CSS selector APIs.
 
 ---
 
@@ -662,143 +628,181 @@ node scripts/cheliped-cli.mjs --session shopping '[{"cmd":"goto","args":["https:
 
 ---
 
-## 🏗 Architecture
+## 📊 Full Benchmark Results
 
-```
-cheliped-browser/
-├── SKILL.md                    # Skill definition
-├── LICENSE.txt                 # MIT
-└── scripts/
-    ├── cheliped-cli.mjs        # CLI entry point
-    ├── src/
-    │   ├── api/                # Cheliped class — main API
-    │   ├── cdp/                # CDP connection + transport + launcher
-    │   ├── dom/                # Agent DOM builder, extractor, compressor
-    │   ├── graph/              # UI graph + semantic action generator
-    │   ├── security/           # Domain allowlist, prompt guard
-    │   └── session/            # Cookie persistence
-    ├── tests/                  # Unit + integration tests
-    └── examples/               # Demo scripts
-```
+> Benchmarked on 16 sites (static, SPA, forms, complex, edge cases) · 2026-03-20 · v0.2.1
 
-### Agent DOM Pipeline
+### Detailed Comparison — All Tools
 
-The core concept of Cheliped is the **Agent DOM** — a compressed, LLM-friendly representation of a web page. Here's how a raw DOM tree is transformed into an Agent DOM:
+#### Architecture
 
-```mermaid
-flowchart LR
-    subgraph Chrome["Chrome (CDP)"]
-        DOM["Raw DOM Tree\n~130K tokens"]
-        IFrame["iframe Content"]
-    end
+| | Cheliped | Tandem Browser | agent-browser | Playwright | Puppeteer | OpenClaw Browser |
+|:--|:---------|:---------------|:--------------|:-----------|:----------|:-----------------|
+| **Runtime** | Headless Chrome (spawned) | Electron app (GUI) | Rust binary + Chrome | Node.js + Chromium | Node.js + Chrome | Playwright over Chrome |
+| **Protocol** | Direct CDP WebSocket | Electron DevTools → CDP | Direct CDP | CDP via abstraction | CDP via abstraction | Playwright over CDP |
+| **API style** | CLI / JS library | HTTP REST API (127.0.0.1:8765) | CLI commands | JS library | JS library | HTTP REST API via gateway |
+| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | CDP `Accessibility.getFullAXTree()` → compact filter → `@ref` labels | CDP AXTree | `ariaSnapshot()` | `accessibility.snapshot()` | Playwright `ariaSnapshot()` / `_snapshotForAI()` |
+| **Human-in-the-loop** | No | Yes (Wingman panel, captcha detection) | No | No | No | No |
+| **Security** | Domain allowlist + prompt guard | 6-layer (network, JS AST, behavior) | None | None | None | None |
 
-    subgraph Pipeline["Agent DOM Pipeline"]
-        EXT["DomExtractor\nFull tree + iframes\n(parallel extraction)"]
-        FIL["DomFilter\nRemove hidden,\nscript, style"]
-        SEM["SemanticExtractor\nCategorize:\nbutton, link,\ninput, text..."]
-        CMP["TokenCompressor\nTruncate text,\nlimit counts"]
-        BLD["AgentDomBuilder\nAssign agentId\n→ backendNodeId\nmapping"]
-    end
+#### Output Format
 
-    subgraph Output["Agent DOM (~2.5K tokens)"]
-        JSON["buttons: [{id:3, text}]\nlinks: [{id:6, href}]\ninputs: [{id:5, type}]\ntexts: [{id:8, text}]"]
-    end
-
-    DOM --> EXT
-    IFrame -.-> EXT
-    EXT --> FIL --> SEM --> CMP --> BLD --> JSON
-
-    style Chrome fill:#1a1a2e,stroke:#30363d,color:#c9d1d9
-    style Pipeline fill:#0d1117,stroke:#30363d,color:#c9d1d9
-    style Output fill:#0d2818,stroke:#3fb950,color:#c9d1d9
+**Cheliped (Agent DOM)** — Structured JSON with categorized arrays:
+```json
+{
+  "texts": [{"agentId": 1, "tag": "h1", "text": "Example Domain"}],
+  "links": [{"agentId": 2, "text": "Learn more", "href": "https://iana.org/..."}],
+  "buttons": [], "inputs": []
+}
 ```
 
-### Observe-Act Loop & ID Mapping
-
-The agent interacts with pages through a simple **observe → act → observe** loop. The key mechanism is the `agentId ↔ backendNodeId` mapping:
-
-```mermaid
-flowchart TB
-    subgraph Agent["AI Agent (LLM)"]
-        OBS["observe()"]
-        ACT["act(agentId, action)"]
-        REASON["Reason about\nAgent DOM JSON"]
-    end
-
-    subgraph Cheliped["Cheliped Core"]
-        ADOM["AgentDomBuilder\nidMap: agentId → backendNodeId"]
-        RESOLVE["resolveAgentId(3)\n→ backendNodeId: 847"]
-        CTRL["BrowserController\nclick / fill / select\nby backendNodeId"]
-    end
-
-    subgraph CDP["Chrome DevTools Protocol"]
-        DOMAPI["DOM.getDocument\nDOM.getBoxModel\nDOM.resolveNode"]
-        INPUT["Input.dispatchMouseEvent\nInput.insertText\nDOM.focus"]
-    end
-
-    OBS --> ADOM
-    ADOM -->|"Agent DOM JSON\n{buttons:[{id:3,...}]}"| REASON
-    REASON -->|"click 3"| ACT
-    ACT --> RESOLVE
-    RESOLVE --> CTRL
-    CTRL --> DOMAPI
-    CTRL --> INPUT
-    INPUT -->|"Page state changed"| OBS
-
-    style Agent fill:#1c1917,stroke:#f0883e,color:#c9d1d9
-    style Cheliped fill:#0d1117,stroke:#58a6ff,color:#c9d1d9
-    style CDP fill:#1a1a2e,stroke:#30363d,color:#c9d1d9
+**OpenClaw (AI Snapshot)** — YAML-like accessibility tree with ref tokens:
+```yaml
+- heading "Example Domain" [level=1] [ref=e3]
+- paragraph: This domain is for use in documentation examples...
+- link "Learn more" [ref=e6] [cursor=pointer]:
+  - /url: https://iana.org/domains/example
 ```
 
-### Element Category Classification
-
-The semantic extractor classifies DOM elements into 8 categories. Only non-empty categories are included in the output (token optimization):
-
-```mermaid
-flowchart LR
-    subgraph HTML["HTML Elements"]
-        BTN["button\n[role=button]"]
-        A["a[href]\n[role=link]"]
-        INP["input\n[role=textbox]\n[role=checkbox]"]
-        SEL["select"]
-        TA["textarea"]
-        FORM["form"]
-        TXT["h1-h6, p, li\nlabel, span, td"]
-        IMG["img"]
-    end
-
-    subgraph AgentDom["Agent DOM Categories"]
-        B["buttons[]"]
-        L["links[]"]
-        I["inputs[]"]
-        S["selects[]"]
-        T2["textareas[]"]
-        F["forms[]"]
-        TX["texts[]"]
-        IM["images[]"]
-    end
-
-    BTN --> B
-    A --> L
-    INP --> I
-    SEL --> S
-    TA --> T2
-    FORM --> F
-    TXT --> TX
-    IMG --> IM
-
-    style HTML fill:#1a1a2e,stroke:#30363d,color:#c9d1d9
-    style AgentDom fill:#0d2818,stroke:#3fb950,color:#c9d1d9
+**Tandem (AXTree Snapshot)** — Indented accessibility tree with `@ref` labels:
+```
+- WebArea "Example Domain" [@e1]
+  - heading "Example Domain" [@e2]
+  - paragraph "This domain is for use..." [@e3]
+  - link "More information..." [@e4]
 ```
 
----
+**Playwright (Aria Snapshot)** — YAML-like flat tree:
+```yaml
+- heading "Example Domain" [level=1]
+- paragraph: This domain is for use in...
+- link "More information..."
+```
 
-## 📊 Benchmark
+**Puppeteer (Accessibility Snapshot)** — JSON tree with roles:
+```json
+{"role": "WebArea", "name": "Example Domain", "children": [
+  {"role": "heading", "name": "Example Domain", "level": 1},
+  {"role": "link", "name": "More information..."}
+]}
+```
+
+#### Feature Comparison
+
+| Feature | Cheliped | Tandem | agent-browser | Playwright | Puppeteer | OpenClaw |
+|:--------|:---------|:-------|:--------------|:-----------|:----------|:---------|
+| **Element IDs** | Numeric `agentId` | `@ref` (`@e1`) | None | CSS selectors | CSS selectors | Symbolic `[ref=eN]` |
+| **Click/Fill** | By agentId | By @ref | N/A | By locator | By selector | By ref |
+| **Human typing** | `fillHuman()` | BehaviorReplay | N/A | N/A | N/A | N/A |
+| **Enterprise framework** | WebSquare auto-detect | No | No | No | No | No |
+| **Korean IME** | `Input.insertText` | Unknown | No | `type()` | `type()` | No |
+| **Content extraction** | Semantic DOM pipeline | Structured by page type | Raw text | A11y tree | A11y tree | YAML a11y tree |
+| **Captcha detection** | No | Auto-detect + show | No | No | No | No |
+| **Stealth patches** | No | Yes | No | No | No | No |
+| **Session isolation** | User data dir | X-Session + partition | No | Browser context | Browser context | Playwright context |
+| **Multi-tab** | No | Yes (250+ endpoints) | No | Yes | Yes | Yes |
+| **Dialog handling** | No | No | No | Yes | Yes | Yes |
+| **File upload** | No | No | No | Yes | Yes | Yes |
+| **Cookie CRUD** | No | No | No | Yes | Yes | Yes |
+| **JS evaluate** | `runJs()` | `/execute-js` | No | `page.evaluate()` | `page.evaluate()` | Scoped evaluate |
+
+#### When to Use Which
+
+| Scenario | Recommended | Why |
+|:---------|:-----------|:----|
+| **Quick page scan** | Cheliped | Fastest extraction (44ms), fewest tokens (2,588) |
+| **Complex SPA interaction** | Playwright | Full auto-wait, robust locator API |
+| **Structured data extraction** | Cheliped | Categorized arrays (texts/links/buttons/inputs) are immediately parseable |
+| **Lightweight skill integration** | Cheliped | Zero framework deps (ws only), self-contained CLI |
+| **Secure human-AI browsing** | Tandem | 6-layer security, captcha detection, human-in-the-loop |
+| **Human + AI co-browsing** | Tandem | Wingman panel, persistent messenger panels, shared live workflow |
+| **Browser testing / E2E** | Playwright | Mature framework, auto-wait, trace recording |
+| **Headless scripting** | Puppeteer | Google-backed, lightweight, well-documented |
+
+### OpenClaw Internal Browser — Separate Comparison
+
+OpenClaw's internal browser runs as an HTTP gateway service (not a standalone library), so it is benchmarked separately against Cheliped.
+
+#### Architecture
+
+| | Cheliped | OpenClaw Browser |
+|:--|:---------|:-----------------|
+| **Protocol** | Direct CDP WebSocket (raw) | Playwright over CDP |
+| **Browser launch** | Self-managed headless Chrome | Attached to running Chrome instance |
+| **API style** | CLI JSON commands / JS library | HTTP REST API via gateway |
+| **Snapshot method** | Custom DOM pipeline (extract → filter → semantic → compress) | Playwright `ariaSnapshot()` / `_snapshotForAI()` |
+
+#### Output Format
+
+**OpenClaw (AI Snapshot)** — YAML-like accessibility tree with ref tokens:
+```yaml
+- heading "Example Domain" [level=1] [ref=e3]
+- paragraph: This domain is for use in documentation examples...
+- link "Learn more" [ref=e6] [cursor=pointer]:
+  - /url: https://iana.org/domains/example
+```
+
+#### Token Output & Speed
+
+![Cheliped vs OpenClaw: Tokens](docs/images/benchmark-openclaw-tokens.png)
+
+| Site | Cheliped | OpenClaw (full) | OpenClaw (efficient) | Cheliped Speed | OpenClaw Speed |
+|:-----|--------:|----------------:|--------------------:|--------------:|--------------:|
+| Hacker News | **7,812** | 26,396 | **264** | **13ms** | 1,812ms |
+| Wikipedia | **23,104** | 31,656 | 12,177 | **60ms** | 1,219ms |
+| GitHub | **6,698** | 8,424 | 2,465 | **21ms** | 1,153ms |
+| Example.com | 146 | 188 | **85** | **1ms** | 1,033ms |
+| MDN Web Docs | **7,639** | 9,394 | 2,688 | **9ms** | 1,187ms |
+| BBC | **4,458** | 24,511 | 7,828 | 370ms | 1,278ms |
+| **Average** | **8,310** | **16,762** | **4,251** | **79ms** | **1,280ms** |
+
+![Cheliped vs OpenClaw: Speed](docs/images/benchmark-openclaw-speed.png)
+
+> OpenClaw's efficient mode (`interactive=true` + `compact=true` + `maxDepth=6`) achieves the lowest token count (4,251 avg) by returning only interactive elements. However, it runs 16x slower (1,280ms) due to the Playwright abstraction layer.
+
+### Performance at a Glance
+
+![Benchmark Summary](docs/images/benchmark-summary.png)
+
+![Quality Breakdown](docs/images/benchmark-quality-breakdown.png)
+
+### Strengths
+
+- **2–4x fewer tokens** than all competitors — directly reduces LLM API costs
+- **Fastest extraction (44ms avg)** — 2–5x faster than alternatives via direct CDP
+- **Best content recognition (88.9%)** — highest recall on links, buttons, inputs, headings
+- **Text deduplication** — removes duplicate text elements from nested containers (e.g. `<td><span>`)  while preserving headings
+- **Agent DOM** — purpose-built for LLM agents: numbered interactive elements with semantic grouping
+- **Zero framework dependencies** — just `ws` for WebSocket, no Playwright/Puppeteer required
+- **Same-origin iframe extraction** — merges iframe content into main Agent DOM (CDP-based)
+- **Smart link deduplication** — keeps best text per URL, reduces noise on link-heavy pages
+- **Fast extract() path** — `extract('text')` and `extract('links')` use lightweight JS evaluation, bypassing the full DOM pipeline (14ms vs 1,100ms+ on heavy pages)
+- **React/SPA fill** — native input value setters bypass synthetic event systems
+- **WebSquare/enterprise framework support** — auto-detects WebSquare and uses native `setValue()` API to update both DOM and framework internal state. Tested on g2b.go.kr (Korean government procurement)
+- **Korean IME input** — `Input.insertText` handles Korean composition correctly, unlike `dispatchKeyEvent`
+- **CSS selector commands** — `fill-selector`, `click-selector`, `focus-selector`, `type`, `press-key` for direct element interaction without agentId
+- **Session persistence** — Chrome stays alive between agent invocations, no restart overhead
+- **Concurrent sessions** — multiple agents browse independently with `--session`
+
+### Known Limitations
+
+Tested on 10 edge-case sites (NPM, Reddit, YouTube, Twitter/X, Google, Stack Overflow, MDN API, W3Schools, JSONPlaceholder, HTTPBin):
+
+- **Cross-origin iframe / Shadow DOM blind spot** — HTTPBin (Swagger UI in cross-origin iframe): buttons 0/11, inputs 0/1, headings 2/13. Same-origin iframes are now extracted, but cross-origin and shadow roots remain invisible. Playwright has the same limitation via ariaSnapshot.
+- **Link cap on large pages** — `maxLinks: 5000` but link dedup caps at first occurrence per href. MDN API: 500/1,230 unique links. Configurable but adds tokens.
+- **Over-detection on JS-heavy pages** — NPM search: GT reports 2 links (pre-render) but Cheliped finds 105 (post-render). This is actually more accurate, but inflates token count (3,865 tok vs Playwright's 2 tok).
+- **Heavy SPA navigation is slow** — Twitter/X, YouTube: all tools are slow on auth-walled SPAs.
+- **Heading under-detect on complex pages** — MDN API: 24/52 headings detected (46%). Heading dedup removes duplicates but some unique headings in deeply nested structures are missed. Headings wrapped in links (`<a><h2>...</h2></a>`) are now detected with the `tag` field preserved on the link element.
+- **Slow `observe()` on heavy pages** — eBay, CNN, Naver: 1–1.7s due to `DOM.getDocument`. Use `extract('text')` or `extract('links')` for 5–365x faster extraction when full Agent DOM isn't needed.
+- **Bot detection** — Amazon, Booking.com serve CAPTCHA to headless Chrome. Use `headless: false` or session cookies.
+- **Small SPA token overhead** — TodoMVC (655 tok raw): Cheliped 521 tok vs Puppeteer 388 tok. Structured JSON overhead is minimal on tiny pages.
+- **Early-stage project** — not yet battle-tested in production. Playwright and Puppeteer have years of maturity.
+- **Benchmark caveats**: token estimation uses `chars/4` (not tiktoken); Playwright/Puppeteer benchmarked via a11y snapshots, not their primary CSS selector APIs.
+
+### Token Efficiency
 
 > **Date**: 2026-03-20 · **Versions**: Cheliped 0.2.1, agent-browser 0.20.14, Playwright 1.58.2, Puppeteer 22.15.0
 > **Sites**: Hacker News, Wikipedia, GitHub Trending, Example.com, React TodoMVC (SPA), MDN Web Docs · **Environment**: macOS, Node.js 24, Chrome
-
-### Token Efficiency
 
 | Site | Raw HTML | Cheliped | agent-browser | Playwright | Puppeteer | Tandem |
 |:-----|--------:|---------:|--------------:|-----------:|----------:|-------:|
