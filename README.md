@@ -1139,6 +1139,24 @@ npm run test:integration  # Integration tests (needs Chrome)
 
 ---
 
+## ⭐ Star History
+
+<a href="https://star-history.com/#tykimos/cheliped-browser&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=tykimos/cheliped-browser&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=tykimos/cheliped-browser&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=tykimos/cheliped-browser&type=Date" />
+ </picture>
+</a>
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Feel free to open an [issue](https://github.com/tykimos/cheliped-browser/issues) or submit a [pull request](https://github.com/tykimos/cheliped-browser/pulls).
+
+---
+
 ## 📜 License
 
 MIT — do whatever you want with it.
