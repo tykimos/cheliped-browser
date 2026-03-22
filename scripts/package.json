@@ -1,6 +1,6 @@
 {
   "name": "cheliped-browser",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "Agent Browser Runtime — AI agent-friendly browser control via CDP",
   "type": "module",
   "main": "./dist/index.cjs",
