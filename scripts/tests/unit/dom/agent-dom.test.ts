@@ -115,18 +115,32 @@ describe('AgentDomBuilder', () => {
     expect(result.timestamp).toBeLessThanOrEqual(after);
   });
 
-  it('output matches PRD grouped format (all group arrays present)', () => {
+  it('output omits empty arrays for token efficiency (TOK-1)', () => {
     const builder = new AgentDomBuilder();
     const result = builder.build([], 'https://example.com', 'Empty');
 
+    // Empty arrays are intentionally omitted to reduce token count
+    expect(result.buttons).toBeUndefined();
+    expect(result.links).toBeUndefined();
+    expect(result.inputs).toBeUndefined();
+    expect(result.selects).toBeUndefined();
+    expect(result.textareas).toBeUndefined();
+    expect(result.forms).toBeUndefined();
+    expect(result.texts).toBeUndefined();
+    expect(result.images).toBeUndefined();
+  });
+
+  it('output includes non-empty arrays when elements exist', () => {
+    const builder = new AgentDomBuilder();
+    const elements: SemanticElement[] = [
+      makeElement('button', { text: 'OK' }),
+      makeElement('link', { href: '/', text: 'Home' }),
+    ];
+    const result = builder.build(elements, 'https://example.com', 'Test');
+
     expect(Array.isArray(result.buttons)).toBe(true);
     expect(Array.isArray(result.links)).toBe(true);
-    expect(Array.isArray(result.inputs)).toBe(true);
-    expect(Array.isArray(result.selects)).toBe(true);
-    expect(Array.isArray(result.textareas)).toBe(true);
-    expect(Array.isArray(result.forms)).toBe(true);
-    expect(Array.isArray(result.texts)).toBe(true);
-    expect(Array.isArray(result.images)).toBe(true);
+    expect(result.inputs).toBeUndefined(); // No inputs → omitted
   });
 
   it('copies element properties to AgentDomNode correctly', () => {

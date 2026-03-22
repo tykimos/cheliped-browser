@@ -198,6 +198,34 @@ async function executeCommand(cheliped, cmdObj) {
       return await cheliped.pressKey(key);
     }
 
+    case 'back':
+      return await cheliped.goBack();
+
+    case 'forward':
+      return await cheliped.goForward();
+
+    case 'hover': {
+      const agentId = parseInt(args[0], 10);
+      if (isNaN(agentId)) throw new Error('hover: 유효한 agentId(숫자)가 필요합니다.');
+      return await cheliped.hover(agentId);
+    }
+
+    case 'scroll': {
+      const direction = args[0] || 'down';
+      const pixels = args[1] ? parseInt(args[1], 10) : undefined;
+      if (!['up', 'down', 'left', 'right'].includes(direction)) {
+        throw new Error(`scroll: 방향은 up, down, left, right 중 하나. 받은 값: ${direction}`);
+      }
+      return await cheliped.scroll(direction, pixels);
+    }
+
+    case 'wait-for': {
+      const selector = args[0];
+      const timeout = args[1] ? parseInt(args[1], 10) : undefined;
+      if (!selector) throw new Error('wait-for: CSS 선택자가 필요합니다.');
+      return await cheliped.waitForSelector(selector, timeout);
+    }
+
     case 'wait': {
       const ms = parseInt(args[0] || '1000', 10);
       await new Promise(resolve => setTimeout(resolve, ms));

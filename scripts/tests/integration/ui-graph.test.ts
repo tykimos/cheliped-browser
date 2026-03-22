@@ -23,14 +23,18 @@ describe('UI Graph Integration', () => {
     expect(linkNodes.length).toBeGreaterThan(0);
   });
 
-  it('should generate semantic actions', async () => {
+  it('should generate semantic actions (low-confidence filtered)', async () => {
     cheliped = new Cheliped({ headless: true });
     await cheliped.launch();
     await cheliped.goto('https://example.com');
 
     const actions = await cheliped.actions();
-    // example.com has at least one link, so should have open_link actions
+    // example.com only has simple links (open_link confidence=0.3)
+    // which are below the 0.7 threshold, so no actions are returned
     const linkActions = actions.filter(a => a.type === 'open_link');
-    expect(linkActions.length).toBeGreaterThan(0);
+    expect(linkActions.length).toBe(0);
+
+    // actions() should still return an array (possibly empty)
+    expect(Array.isArray(actions)).toBe(true);
   });
 });

@@ -351,8 +351,9 @@ export class BrowserController {
   }
 
   /**
-   * Press a special key (Enter, Tab, Backspace, Escape, etc.).
-   * Sends keyDown + keyUp via CDP Input.dispatchKeyEvent.
+   * Press a key or key combination (e.g., "Enter", "ctrl+a", "shift+tab", "ctrl+shift+k").
+   * Modifier keys: ctrl, shift, alt, meta (cmd on Mac).
+   * Sends keyDown + keyUp via CDP Input.dispatchKeyEvent with modifier bitmask.
    */
   async pressKey(key: string): Promise<void> {
     const keyMap: Record<string, { key: string; code: string; text?: string }> = {
@@ -372,16 +373,58 @@ export class BrowserController {
       'space':     { key: ' ', code: 'Space', text: ' ' },
     };
 
-    const info = keyMap[key.toLowerCase()];
-    if (!info) {
-      throw new Error(`Unknown key: ${key}. Supported: ${Object.keys(keyMap).join(', ')}`);
+    // Parse modifier combo: "ctrl+shift+a" → modifiers + key
+    const parts = key.toLowerCase().split('+');
+    let modifiers = 0;
+    const modifierMap: Record<string, number> = {
+      'alt': 1, 'ctrl': 2, 'control': 2, 'meta': 4, 'cmd': 4, 'command': 4, 'shift': 8,
+    };
+
+    const modifierKeys: string[] = [];
+    let mainKey = '';
+    for (const part of parts) {
+      if (modifierMap[part] !== undefined) {
+        modifiers |= modifierMap[part];
+        modifierKeys.push(part);
+      } else {
+        mainKey = part;
+      }
+    }
+
+    // If no main key was found (e.g., just "ctrl"), treat the last modifier as the key
+    if (!mainKey && modifierKeys.length > 0) {
+      mainKey = modifierKeys.pop()!;
+      modifiers = 0;
+      for (const mk of modifierKeys) {
+        modifiers |= modifierMap[mk];
+      }
+    }
+
+    // Look up in keyMap first, then treat as single character
+    const info = keyMap[mainKey];
+    let keyName: string;
+    let code: string;
+    let text: string | undefined;
+
+    if (info) {
+      keyName = info.key;
+      code = info.code;
+      text = info.text;
+    } else if (mainKey.length === 1) {
+      // Single character key (a-z, 0-9, etc.)
+      keyName = modifiers & 8 ? mainKey.toUpperCase() : mainKey; // Shift → uppercase
+      code = `Key${mainKey.toUpperCase()}`;
+      text = modifiers ? undefined : mainKey; // Don't send text for combo keys
+    } else {
+      throw new Error(`Unknown key: ${key}. Supported: ${Object.keys(keyMap).join(', ')}, or single characters with modifiers (ctrl+a, shift+tab)`);
     }
 
     const eventBase: Record<string, unknown> = {
-      key: info.key,
-      code: info.code,
+      key: keyName,
+      code,
+      modifiers,
     };
-    if (info.text) eventBase.text = info.text;
+    if (text) eventBase.text = text;
 
     await this.transport.send('Input.dispatchKeyEvent', {
       type: 'keyDown',
@@ -389,8 +432,9 @@ export class BrowserController {
     });
     await this.transport.send('Input.dispatchKeyEvent', {
       type: 'keyUp',
-      key: info.key,
-      code: info.code,
+      key: keyName,
+      code,
+      modifiers,
     });
   }
 
@@ -573,6 +617,116 @@ export class BrowserController {
       arguments: [{ value: optionValue }],
       returnByValue: true,
     });
+  }
+
+  /**
+   * Navigate back in browser history.
+   */
+  async goBack(): Promise<void> {
+    const historyResult = await this.transport.send('Page.getNavigationHistory') as Record<string, unknown>;
+    const currentIndex = historyResult.currentIndex as number;
+    const entries = historyResult.entries as Array<Record<string, unknown>>;
+    if (currentIndex > 0) {
+      const entryId = entries[currentIndex - 1].id as number;
+      await this.transport.send('Page.navigateToHistoryEntry', { entryId });
+      await this.page.waitForStable();
+    }
+    this.resetFrameworkCache();
+  }
+
+  /**
+   * Navigate forward in browser history.
+   */
+  async goForward(): Promise<void> {
+    const historyResult = await this.transport.send('Page.getNavigationHistory') as Record<string, unknown>;
+    const currentIndex = historyResult.currentIndex as number;
+    const entries = historyResult.entries as Array<Record<string, unknown>>;
+    if (currentIndex < entries.length - 1) {
+      const entryId = entries[currentIndex + 1].id as number;
+      await this.transport.send('Page.navigateToHistoryEntry', { entryId });
+      await this.page.waitForStable();
+    }
+    this.resetFrameworkCache();
+  }
+
+  /**
+   * Hover over an element by backendNodeId.
+   * Dispatches a mouseMoved event at the element's center.
+   */
+  async hoverByBackendNodeId(backendNodeId: number): Promise<void> {
+    try {
+      const boxResult = await this.transport.send('DOM.getBoxModel', {
+        backendNodeId,
+      }) as Record<string, unknown>;
+      const model = boxResult.model as Record<string, unknown>;
+      const content = model.content as number[];
+      const x = (content[0] + content[2] + content[4] + content[6]) / 4;
+      const y = (content[1] + content[3] + content[5] + content[7]) / 4;
+      await this.transport.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x,
+        y,
+      });
+    } catch {
+      // Fallback: scroll into view and dispatch mouseover event via JS
+      const resolveResult = await this.transport.send('DOM.resolveNode', {
+        backendNodeId,
+      }) as Record<string, unknown>;
+      const remoteObject = resolveResult.object as Record<string, unknown>;
+      const objectId = remoteObject.objectId as string;
+      await this.transport.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() {
+          this.scrollIntoView({ block: 'center' });
+          this.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+          this.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        }`,
+        returnByValue: true,
+      });
+    }
+  }
+
+  /**
+   * Scroll the page by a given amount in pixels.
+   * Uses Input.dispatchMouseEvent with type 'mouseWheel'.
+   */
+  async scroll(direction: 'up' | 'down' | 'left' | 'right', pixels: number = 300): Promise<void> {
+    let deltaX = 0;
+    let deltaY = 0;
+    switch (direction) {
+      case 'up':    deltaY = -pixels; break;
+      case 'down':  deltaY = pixels; break;
+      case 'left':  deltaX = -pixels; break;
+      case 'right': deltaX = pixels; break;
+    }
+    await this.transport.send('Input.dispatchMouseEvent', {
+      type: 'mouseWheel',
+      x: 400,
+      y: 300,
+      deltaX,
+      deltaY,
+    });
+    // Brief pause for scroll to settle
+    await new Promise(resolve => setTimeout(resolve, 200));
+  }
+
+  /**
+   * Wait for a CSS selector to appear in the DOM.
+   * Polls every 200ms until found or timeout.
+   */
+  async waitForSelector(selector: string, timeout: number = 5000): Promise<boolean> {
+    const interval = 200;
+    const maxAttempts = Math.ceil(timeout / interval);
+    for (let i = 0; i < maxAttempts; i++) {
+      const result = await this.transport.send('Runtime.evaluate', {
+        expression: `!!document.querySelector(${JSON.stringify(selector)})`,
+        returnByValue: true,
+      }) as Record<string, unknown>;
+      const r = result.result as Record<string, unknown>;
+      if (r?.value === true) return true;
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+    return false;
   }
 
   async runJs(script: string): Promise<unknown> {

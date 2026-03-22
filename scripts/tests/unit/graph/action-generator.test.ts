@@ -37,7 +37,7 @@ describe('ActionGenerator', () => {
     expect(searchAction!.confidence).toBeGreaterThanOrEqual(0.8);
   });
 
-  it('generates open_link actions for navigation links', () => {
+  it('open_link actions are generated with low confidence and filtered out by threshold', () => {
     const elements: SemanticElement[] = [
       { backendNodeId: 1, category: 'link', text: 'Home', href: '/' },
       { backendNodeId: 2, category: 'link', text: 'About', href: '/about' },
@@ -45,21 +45,21 @@ describe('ActionGenerator', () => {
     const graph = builder.build(elements, 'https://example.com', 'Test');
     const actions = generator.generate(graph);
 
+    // open_link has confidence=0.3, below the 0.7 threshold → filtered out
     const linkActions = actions.filter(a => a.type === 'open_link');
-    expect(linkActions).toHaveLength(2);
-    expect(linkActions[0].confidence).toBe(1.0);
+    expect(linkActions).toHaveLength(0);
   });
 
-  it('generates click_button for standalone buttons', () => {
+  it('click_button for standalone buttons is filtered out by confidence threshold', () => {
     const elements: SemanticElement[] = [
       { backendNodeId: 1, category: 'button', text: 'Accept Cookies' },
     ];
     const graph = builder.build(elements, 'https://example.com', 'Test');
     const actions = generator.generate(graph);
 
+    // click_button has confidence=0.4, below the 0.7 threshold → filtered out
     const clickAction = actions.find(a => a.type === 'click_button');
-    expect(clickAction).toBeDefined();
-    expect(clickAction!.label).toContain('Accept Cookies');
+    expect(clickAction).toBeUndefined();
   });
 
   it('generates submit_form for generic forms', () => {

@@ -17,29 +17,25 @@ describe('DOM Extraction', () => {
 
     const agentDom = await cheliped.observe();
 
-    // Verify grouped structure
-    expect(agentDom).toHaveProperty('buttons');
-    expect(agentDom).toHaveProperty('links');
-    expect(agentDom).toHaveProperty('inputs');
-    expect(agentDom).toHaveProperty('texts');
-    expect(agentDom).toHaveProperty('images');
+    // Verify core metadata is always present
     expect(agentDom).toHaveProperty('url');
     expect(agentDom).toHaveProperty('title');
     expect(agentDom).toHaveProperty('timestamp');
 
-    // example.com has a link (text varies by locale/version, e.g. "More information..." or "Learn more")
-    expect(agentDom.links.length).toBeGreaterThan(0);
-    const firstLink = agentDom.links[0];
+    // Empty arrays are omitted for token efficiency (TOK-1)
+    // example.com has links and texts, but may not have buttons/inputs/images
+    expect(agentDom.links?.length).toBeGreaterThan(0);
+    const firstLink = agentDom.links![0];
     expect(firstLink).toBeDefined();
     expect(firstLink.href).toBeDefined();
 
     // Should have text content
-    expect(agentDom.texts.length).toBeGreaterThan(0);
+    expect(agentDom.texts?.length).toBeGreaterThan(0);
 
-    // All elements should have IDs
+    // All present elements should have IDs
     const allElements = [
-      ...agentDom.buttons, ...agentDom.links, ...agentDom.inputs,
-      ...agentDom.texts, ...agentDom.images,
+      ...(agentDom.buttons ?? []), ...(agentDom.links ?? []), ...(agentDom.inputs ?? []),
+      ...(agentDom.texts ?? []), ...(agentDom.images ?? []),
     ];
     for (const el of allElements) {
       expect(el.id).toBeGreaterThan(0);

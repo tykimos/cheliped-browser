@@ -398,8 +398,13 @@ node scripts/cheliped-cli.mjs '[{"cmd":"<command>","args":["..."]}]'
 | `click-selector` | `["cssSelector"]` | Click by CSS selector, bypasses agentId |
 | `focus-selector` | `["cssSelector"]` | Focus element by CSS selector (CDP `DOM.focus`) |
 | `type` | `["text"]` | Type into currently focused element (IME-compatible) |
-| `press-key` | `["keyName"]` | Press special key: Enter, Tab, Backspace, Escape, arrows |
+| `press-key` | `["keyName"]` | Press key or combo: Enter, Tab, Escape, `ctrl+a`, `shift+tab`, `ctrl+shift+k` |
 | `select` | `["agentId", "value"]` | Select option from `<select>` by text or value |
+| `back` | — | Navigate back in browser history |
+| `forward` | — | Navigate forward in browser history |
+| `hover` | `["agentId"]` | Hover over element (triggers dropdown menus, tooltips) |
+| `scroll` | `["direction", "pixels"]` | Scroll page: `up`/`down`/`left`/`right`, default 300px |
+| `wait-for` | `["selector", "timeout"]` | Wait for CSS selector to appear (default 5000ms) |
 | `screenshot` | `["path"]` | Capture page as PNG |
 | `run-js` | `["expr"]` | Execute JS in page context |
 | `extract` | `["text"∣"links"∣"all"]` | Pull structured data (text/links use fast path) |

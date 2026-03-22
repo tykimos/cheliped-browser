@@ -41,6 +41,11 @@ First call auto-launches Chrome and saves session. Subsequent calls reconnect. C
 | `actions` | none | `[{ id, type, label, params }]` |
 | `perform` | `["actionId"]` + `"params":{...}` | `{ success, actionId }` |
 | `observe-graph` | none | `{ nodes, edges, forms }` |
+| `back` | none | `{ success }` — navigate back in history |
+| `forward` | none | `{ success }` — navigate forward in history |
+| `hover` | `["agentId"]` | `{ success }` — hover over element |
+| `scroll` | `["direction", "pixels"]` | `{ success }` — direction: up/down/left/right |
+| `wait-for` | `["selector", "timeout"]` | `{ found }` — wait for CSS selector |
 | `close` | none | `{ success }` |
 
 ## Examples

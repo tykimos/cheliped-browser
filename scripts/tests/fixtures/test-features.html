@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cheliped Feature Test Page</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 20px; }
+    h1 { margin-top: 0; }
+
+    /* Hover test */
+    .hover-menu { position: relative; display: inline-block; margin: 10px 0; }
+    .hover-menu .trigger { padding: 10px 20px; background: #4a90d9; color: white; cursor: pointer; border-radius: 4px; }
+    .hover-menu .dropdown { display: none; position: absolute; top: 100%; left: 0; background: white; border: 1px solid #ccc; min-width: 150px; z-index: 10; }
+    .hover-menu:hover .dropdown { display: block; }
+    .hover-menu .dropdown a { display: block; padding: 8px 16px; text-decoration: none; color: #333; }
+    .hover-menu .dropdown a:hover { background: #f0f0f0; }
+    #hover-status { color: #666; margin: 5px 0; }
+
+    /* Scroll test */
+    .scroll-section { height: 2000px; background: linear-gradient(to bottom, #e0f0ff, #ffe0e0); padding: 20px; margin: 20px 0; }
+    .scroll-marker { padding: 10px; background: #ffeb3b; margin: 400px 0; font-weight: bold; }
+
+    /* Keyboard test */
+    .keyboard-area { margin: 20px 0; }
+    .keyboard-area input { padding: 10px; font-size: 16px; width: 300px; border: 2px solid #ccc; border-radius: 4px; }
+    #key-log { background: #f5f5f5; padding: 10px; min-height: 40px; margin: 10px 0; font-family: monospace; border-radius: 4px; }
+
+    /* WaitFor test */
+    #delayed-element { display: none; padding: 15px; background: #4caf50; color: white; margin: 20px 0; border-radius: 4px; }
+    .load-button { padding: 10px 20px; background: #2196f3; color: white; border: none; cursor: pointer; border-radius: 4px; }
+
+    /* Navigation links */
+    .nav-links { margin: 20px 0; }
+    .nav-links a { margin-right: 15px; padding: 8px 16px; background: #607d8b; color: white; text-decoration: none; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1 id="page-title">Cheliped Feature Test Page</h1>
+
+  <!-- Section 1: Hover Test -->
+  <section id="hover-test">
+    <h2>Hover Test</h2>
+    <div class="hover-menu" id="hover-menu-1">
+      <div class="trigger" id="hover-trigger">Hover Me</div>
+      <div class="dropdown" id="hover-dropdown">
+        <a href="#" id="menu-item-1">Option A</a>
+        <a href="#" id="menu-item-2">Option B</a>
+        <a href="#" id="menu-item-3">Option C</a>
+      </div>
+    </div>
+    <div id="hover-status">Not hovered</div>
+  </section>
+
+  <!-- Section 2: Scroll Test -->
+  <section id="scroll-test">
+    <h2>Scroll Test</h2>
+    <div class="scroll-section">
+      <div class="scroll-marker" id="marker-top">Top Marker (visible initially)</div>
+      <div class="scroll-marker" id="marker-middle">Middle Marker (scroll to see)</div>
+      <div class="scroll-marker" id="marker-bottom">Bottom Marker (scroll more to see)</div>
+    </div>
+  </section>
+
+  <!-- Section 3: Keyboard Combo Test -->
+  <section id="keyboard-test">
+    <h2>Keyboard Test</h2>
+    <div class="keyboard-area">
+      <input type="text" id="keyboard-input" value="Hello World" placeholder="Type here or use keyboard shortcuts" />
+      <div id="key-log">Key events will appear here</div>
+    </div>
+  </section>
+
+  <!-- Section 4: WaitFor Test (delayed element) -->
+  <section id="waitfor-test">
+    <h2>WaitFor Test</h2>
+    <button class="load-button" id="load-delayed" onclick="loadDelayed()">Load Delayed Content</button>
+    <div id="delayed-element">This content appeared after a delay!</div>
+    <div id="async-content"></div>
+  </section>
+
+  <!-- Section 5: Navigation Test (for back/forward) -->
+  <section id="nav-test">
+    <h2>Navigation Test</h2>
+    <div class="nav-links">
+      <a href="https://example.com" id="nav-link-1">Go to Example.com</a>
+    </div>
+  </section>
+
+  <script>
+    // Hover tracking
+    const hoverTrigger = document.getElementById('hover-trigger');
+    const hoverStatus = document.getElementById('hover-status');
+    hoverTrigger.addEventListener('mouseenter', () => { hoverStatus.textContent = 'Hovered!'; });
+    hoverTrigger.addEventListener('mouseover', () => { hoverStatus.textContent = 'Hovered!'; });
+    hoverTrigger.addEventListener('mouseleave', () => { hoverStatus.textContent = 'Not hovered'; });
+
+    // Keyboard logging
+    const keyInput = document.getElementById('keyboard-input');
+    const keyLog = document.getElementById('key-log');
+    keyInput.addEventListener('keydown', (e) => {
+      const parts = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.shiftKey) parts.push('Shift');
+      if (e.altKey) parts.push('Alt');
+      if (e.metaKey) parts.push('Meta');
+      parts.push(e.key);
+      keyLog.textContent = 'Last key: ' + parts.join('+');
+    });
+
+    // Delayed content loader
+    function loadDelayed() {
+      setTimeout(() => {
+        document.getElementById('delayed-element').style.display = 'block';
+      }, 1000);
+      setTimeout(() => {
+        document.getElementById('async-content').innerHTML = '<div id="async-loaded" class="loaded-content">Async content loaded!</div>';
+      }, 1500);
+    }
+
+    // Auto-trigger for automated tests (query param ?autoload=1)
+    if (new URLSearchParams(window.location.search).get('autoload') === '1') {
+      loadDelayed();
+    }
+  </script>
+</body>
+</html>

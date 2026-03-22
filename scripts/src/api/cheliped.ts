@@ -249,6 +249,54 @@ export class Cheliped {
     return { success: true, action: 'select', agentId };
   }
 
+  /** Navigate back in browser history. */
+  async goBack(): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.goBack();
+    return { success: true, action: 'back', agentId: -1 };
+  }
+
+  /** Navigate forward in browser history. */
+  async goForward(): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.goForward();
+    return { success: true, action: 'forward', agentId: -1 };
+  }
+
+  /** Hover over an element by agentId. Triggers mouseover/mouseenter events. */
+  async hover(agentId: number): Promise<ActResult> {
+    this.ensureLaunched();
+    const backendNodeId = this.agentDomBuilder.resolveAgentId(agentId);
+    if (backendNodeId === undefined) {
+      throw new Error(`Agent DOM ID ${agentId} not found. Call observe() first to get current Agent DOM.`);
+    }
+    await this.controller!.hoverByBackendNodeId(backendNodeId);
+    return { success: true, action: 'hover', agentId };
+  }
+
+  /**
+   * Scroll the page in a given direction.
+   * @param direction - 'up', 'down', 'left', 'right'
+   * @param pixels - scroll amount in pixels (default: 300)
+   */
+  async scroll(direction: 'up' | 'down' | 'left' | 'right', pixels?: number): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.scroll(direction, pixels);
+    return { success: true, action: 'scroll', agentId: -1 };
+  }
+
+  /**
+   * Wait for a CSS selector to appear in the DOM.
+   * @param selector - CSS selector to wait for
+   * @param timeout - max wait time in ms (default: 5000)
+   * @returns whether the selector was found
+   */
+  async waitForSelector(selector: string, timeout?: number): Promise<{ success: boolean; found: boolean; selector: string }> {
+    this.ensureLaunched();
+    const found = await this.controller!.waitForSelector(selector, timeout);
+    return { success: true, found, selector };
+  }
+
   async extract(type: 'text' | 'links' | 'all'): Promise<ExtractResult> {
     this.ensureLaunched();
     const transport = this.connection!.getTransport();
