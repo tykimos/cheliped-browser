@@ -81,9 +81,9 @@ function killChrome(pid) {
   }
 }
 
-async function getConnectedCheliped(Cheliped, session) {
+async function getConnectedCheliped(Cheliped, session, headless = true) {
   const cheliped = new Cheliped({
-    headless: true,
+    headless,
     stealth: true,
     compression: { enabled: true, maxTextLength: 200, maxTexts: 80, maxLinks: 50 },
   });
@@ -360,6 +360,64 @@ async function executeCommand(cheliped, cmdObj) {
       return { success: true };
     }
 
+    case 'observe-shadow': {
+      const result = await cheliped.observeShadow();
+      return result;
+    }
+
+    case 'click-deep': {
+      const selector = args[0];
+      if (!selector) throw new Error('click-deep: CSS 선택자가 필요합니다. shadow DOM 관통: "#host >>> inner-selector"');
+      return await cheliped.clickDeep(selector);
+    }
+
+    case 'fill-deep': {
+      const selector = args[0];
+      const text = args[1];
+      if (!selector) throw new Error('fill-deep: CSS 선택자가 필요합니다.');
+      if (text === undefined) throw new Error('fill-deep: 입력할 텍스트가 필요합니다.');
+      return await cheliped.fillDeep(selector, text);
+    }
+
+    case 'list-frames': {
+      const frames = await cheliped.listFrames();
+      return { success: true, frames };
+    }
+
+    case 'observe-frame': {
+      const target = args[0];
+      if (target === undefined) throw new Error('observe-frame: 프레임 인덱스(숫자) 또는 URL 부분 문자열이 필요합니다.');
+      const result = await cheliped.observeFrame(target);
+      return result;
+    }
+
+    case 'click-frame': {
+      const target = args[0];
+      const selector = args[1];
+      if (target === undefined) throw new Error('click-frame: 프레임 인덱스(숫자) 또는 URL 부분 문자열이 필요합니다.');
+      if (!selector) throw new Error('click-frame: iframe 내부의 CSS 선택자가 필요합니다.');
+      return await cheliped.clickInFrame(target, selector);
+    }
+
+    case 'fill-frame': {
+      const target = args[0];
+      const selector = args[1];
+      const text = args[2];
+      if (target === undefined) throw new Error('fill-frame: 프레임 인덱스(숫자) 또는 URL 부분 문자열이 필요합니다.');
+      if (!selector) throw new Error('fill-frame: iframe 내부의 CSS 선택자가 필요합니다.');
+      if (text === undefined) throw new Error('fill-frame: 입력할 텍스트가 필요합니다.');
+      return await cheliped.fillInFrame(target, selector, text);
+    }
+
+    case 'run-js-frame': {
+      const target = args[0];
+      const script = args[1];
+      if (target === undefined) throw new Error('run-js-frame: 프레임 인덱스(숫자) 또는 URL 부분 문자열이 필요합니다.');
+      if (!script) throw new Error('run-js-frame: JavaScript 코드가 필요합니다.');
+      const result = await cheliped.runJsInFrame(target, script);
+      return { success: true, result };
+    }
+
     case 'close': {
       // Stop monitor if running
       const monPidFile = `/tmp/cheliped-monitor-${SESSION_FILE.split('-').pop().replace('.json', '')}.pid`;
@@ -384,23 +442,38 @@ async function executeCommand(cheliped, cmdObj) {
 
 async function main() {
   let sessionName = 'default';
-  let rawArg = process.argv[2];
+  let headless = true;
 
-  // Parse --session flag
-  if (rawArg === '--session') {
-    sessionName = process.argv[3];
-    rawArg = process.argv[4];
-  } else if (rawArg?.startsWith('--session=')) {
-    sessionName = rawArg.split('=')[1];
-    rawArg = process.argv[3];
+  // Parse CLI flags from argv (before the JSON command argument)
+  const flagArgs = process.argv.slice(2);
+  let jsonArgIndex = -1;
+
+  for (let i = 0; i < flagArgs.length; i++) {
+    const arg = flagArgs[i];
+    if (arg === '--session' && i + 1 < flagArgs.length) {
+      sessionName = flagArgs[i + 1];
+      i++; // skip next
+    } else if (arg.startsWith('--session=')) {
+      sessionName = arg.split('=')[1];
+    } else if (arg === '--no-headless' || arg === '--headed') {
+      headless = false;
+    } else if (arg === '--headless') {
+      headless = true;
+    } else {
+      // First non-flag argument is the JSON command
+      jsonArgIndex = i;
+      break;
+    }
   }
+
+  let rawArg = jsonArgIndex >= 0 ? flagArgs[jsonArgIndex] : undefined;
 
   SESSION_FILE = `/tmp/cheliped-session-${sessionName}.json`;
 
   if (!rawArg) {
     console.error(JSON.stringify({
       error: '명령 인수가 필요합니다.',
-      usage: 'node cheliped-cli.mjs [--session <name>] \'[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]\'',
+      usage: 'node cheliped-cli.mjs [--session <name>] [--no-headless] \'[{"cmd":"goto","args":["https://example.com"]},{"cmd":"observe"}]\'',
     }));
     process.exit(1);
   }
@@ -442,7 +515,7 @@ async function main() {
   let closeRequested = false;
 
   try {
-    const connected = await getConnectedCheliped(Cheliped, session);
+    const connected = await getConnectedCheliped(Cheliped, session, headless);
     cheliped = connected.cheliped;
 
     for (const cmdObj of commands) {

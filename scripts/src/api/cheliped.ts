@@ -762,6 +762,89 @@ export class Cheliped {
     };
   }
 
+  // ── Frame (iframe) methods ──
+
+  /** List all child frames (iframes) on the current page. */
+  async listFrames(): Promise<unknown> {
+    this.ensureLaunched();
+    return this.controller!.listFrames();
+  }
+
+  /**
+   * Observe interactive elements inside a specific iframe.
+   * @param target - Frame index (0-based) or URL substring to match.
+   */
+  async observeFrame(target: string | number): Promise<unknown> {
+    this.ensureLaunched();
+    return this.controller!.observeFrame(target);
+  }
+
+  /**
+   * Click an element inside an iframe using absolute coordinate dispatch.
+   * @param target - Frame index or URL substring.
+   * @param selector - CSS selector within the iframe.
+   */
+  async clickInFrame(target: string | number, selector: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.clickInFrame(target, selector);
+    return { success: true, action: 'click', agentId: -1, selector };
+  }
+
+  /**
+   * Fill an input inside an iframe.
+   * @param target - Frame index or URL substring.
+   * @param selector - CSS selector within the iframe.
+   * @param text - Text to type.
+   */
+  async fillInFrame(target: string | number, selector: string, text: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.fillInFrame(target, selector, text);
+    return { success: true, action: 'fill', agentId: -1, selector };
+  }
+
+  /**
+   * Run JavaScript inside an iframe context.
+   * @param target - Frame index or URL substring.
+   * @param expression - JavaScript to execute.
+   */
+  async runJsInFrame(target: string | number, expression: string): Promise<unknown> {
+    this.ensureLaunched();
+    return this.controller!.runJsInFrame(target, expression);
+  }
+
+  // ── Shadow DOM methods ──
+
+  /**
+   * Observe shadow DOM hosts and their interactive content.
+   * Finds all elements with shadowRoot and lists their inner elements + iframes.
+   */
+  async observeShadow(): Promise<unknown> {
+    this.ensureLaunched();
+    return this.controller!.observeShadow();
+  }
+
+  /**
+   * Click an element using shadow-piercing deep query.
+   * Selector supports ">>>" to cross shadow DOM boundaries.
+   * Example: "#turnstile-widget >>> input[type=checkbox]"
+   * Plain CSS selectors also work — will recursively search all shadow roots.
+   */
+  async clickDeep(selector: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.clickDeep(selector);
+    return { success: true, action: 'click', agentId: -1, selector };
+  }
+
+  /**
+   * Fill an input using shadow-piercing deep query.
+   * Selector supports ">>>" to cross shadow DOM boundaries.
+   */
+  async fillDeep(selector: string, text: string): Promise<ActResult> {
+    this.ensureLaunched();
+    await this.controller!.fillDeep(selector, text);
+    return { success: true, action: 'fill', agentId: -1, selector };
+  }
+
   getSecurityViolations() {
     return this.securityLayer?.getViolations() || [];
   }

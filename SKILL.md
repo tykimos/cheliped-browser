@@ -47,6 +47,18 @@ First call auto-launches Chrome and saves session. Subsequent calls reconnect. C
 | `scroll` | `["direction", "pixels"]` | `{ success }` — direction: up/down/left/right |
 | `wait-for` | `["selector", "timeout"]` | `{ found }` — wait for CSS selector |
 | `close` | none | `{ success }` |
+| **Shadow DOM Commands** | | |
+| `observe-shadow` | none | `{ shadowHosts: [{ hostSelector, elements, iframes }] }` |
+| `click-deep` | `["selector"]` | `{ success }` — shadow-piercing click |
+| `fill-deep` | `["selector", "text"]` | `{ success }` — shadow-piercing fill |
+| **Iframe Commands** | | |
+| `list-frames` | none | `{ frames: [{ index, url, name }] }` |
+| `observe-frame` | `["target"]` | `{ url, elements: [{ index, tag, text, selector }] }` |
+| `click-frame` | `["target", "selector"]` | `{ success }` — click inside iframe |
+| `fill-frame` | `["target", "selector", "text"]` | `{ success }` — type into iframe input |
+| `run-js-frame` | `["target", "expression"]` | `{ success, result }` — JS in iframe |
+
+`target` = frame index (0-based number from `list-frames`) or URL substring to match.
 
 ## Examples
 
@@ -76,6 +88,42 @@ node scripts/cheliped-cli.mjs --session agent1 '[{"cmd":"goto","args":["https://
 node scripts/cheliped-cli.mjs --session agent2 '[{"cmd":"goto","args":["https://site-b.com"]}]'
 ```
 
+### Interact with shadow DOM content (e.g. Cloudflare Turnstile, web components)
+
+```bash
+# 1. Discover shadow DOM hosts and their contents
+node scripts/cheliped-cli.mjs '[{"cmd":"observe-shadow"}]'
+
+# 2. Click element inside shadow DOM (pierces shadow boundaries recursively)
+node scripts/cheliped-cli.mjs '[{"cmd":"click-deep","args":["input[type=checkbox]"]}]'
+
+# 3. Use ">>>" to explicitly cross shadow DOM boundaries
+node scripts/cheliped-cli.mjs '[{"cmd":"click-deep","args":["#turnstile-widget >>> input[type=checkbox]"]}]'
+
+# 4. Fill input inside shadow DOM
+node scripts/cheliped-cli.mjs '[{"cmd":"fill-deep","args":["#shadow-host >>> input[name=email]","user@example.com"]}]'
+```
+
+`click-deep` and `fill-deep` use absolute coordinate dispatch for real mouse events. Plain selectors auto-search all shadow roots recursively. Use `>>>` to target specific shadow host → inner element paths.
+
+### Interact with iframe content (e.g. Cloudflare Turnstile, CAPTCHA, embedded widgets)
+
+```bash
+# 1. List all iframes on the page
+node scripts/cheliped-cli.mjs '[{"cmd":"list-frames"}]'
+
+# 2. Observe elements inside iframe at index 0
+node scripts/cheliped-cli.mjs '[{"cmd":"observe-frame","args":["0"]}]'
+
+# 3. Click a checkbox inside the iframe (use CSS selector from observe-frame output)
+node scripts/cheliped-cli.mjs '[{"cmd":"click-frame","args":["0","input[type=checkbox]"]}]'
+
+# Or match iframe by URL substring instead of index
+node scripts/cheliped-cli.mjs '[{"cmd":"click-frame","args":["turnstile","input[type=checkbox]"]}]'
+```
+
+The iframe commands use absolute coordinate dispatch (iframe position + element position) to produce real mouse events that pass bot detection.
+
 ## Key Notes
 
 - Call `observe` before `click`/`fill` — agentIds are only valid after observation.
@@ -83,3 +131,6 @@ node scripts/cheliped-cli.mjs --session agent2 '[{"cmd":"goto","args":["https://
 - Agent DOM is token-compressed — far fewer tokens than raw HTML.
 - Chrome persists between calls until `close`. No restart needed.
 - All output is JSON to stdout. Errors: `{ "error": "message" }`.
+- For shadow DOM content (Cloudflare Turnstile, web components): use `observe-shadow` → `click-deep`/`fill-deep`. Supports `>>>` syntax to pierce shadow boundaries.
+- For iframe content (embedded widgets): use `list-frames` → `observe-frame` → `click-frame`/`fill-frame`. Regular `observe`/`click` cannot interact with iframe elements.
+- `list-frames` also discovers iframes hidden inside shadow DOM.

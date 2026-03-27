@@ -3,13 +3,17 @@ import type { GotoResult } from '../types/index.js';
 import type { DownloadResult } from '../types/api.types.js';
 import type { CDPTransport } from '../cdp/transport.js';
 import { Page } from './page.js';
+import { FrameManager } from './frame-manager.js';
+import type { FrameDetail } from './frame-manager.js';
 
 export class BrowserController {
   private page: Page;
   private _webSquareDetected: boolean | null = null;
+  private _frameManager: FrameManager;
 
   constructor(private transport: CDPTransport) {
     this.page = new Page(transport);
+    this._frameManager = new FrameManager(transport);
   }
 
   /**
@@ -34,6 +38,297 @@ export class BrowserController {
   /** Reset WebSquare detection cache (called on navigation). */
   resetFrameworkCache(): void {
     this._webSquareDetected = null;
+    this._frameManager.clearCache();
+  }
+
+  // ── Frame (iframe) methods ──
+
+  /** List all child frames on the current page. */
+  async listFrames(): Promise<FrameDetail[]> {
+    return this._frameManager.listFrames();
+  }
+
+  /** Observe interactive elements inside a specific iframe. */
+  async observeFrame(target: string | number): Promise<unknown> {
+    const frameId = await this._frameManager.resolveFrame(target);
+    return this._frameManager.observeFrame(frameId);
+  }
+
+  /** Click an element inside an iframe by CSS selector. Uses absolute coordinate dispatch. */
+  async clickInFrame(target: string | number, selector: string): Promise<void> {
+    const frameId = await this._frameManager.resolveFrame(target);
+    await this._frameManager.clickInFrame(frameId, selector);
+  }
+
+  /** Fill an input inside an iframe by CSS selector. Uses coordinate click + Input.insertText. */
+  async fillInFrame(target: string | number, selector: string, text: string): Promise<void> {
+    const frameId = await this._frameManager.resolveFrame(target);
+    await this._frameManager.fillInFrame(frameId, selector, text);
+  }
+
+  /** Run JavaScript inside an iframe. */
+  async runJsInFrame(target: string | number, expression: string): Promise<unknown> {
+    const frameId = await this._frameManager.resolveFrame(target);
+    return this._frameManager.evaluateInFrame(frameId, expression);
+  }
+
+  // ── Shadow DOM methods ──
+
+  /**
+   * Deep querySelector that pierces shadow DOM boundaries.
+   * Uses JS to recursively traverse shadowRoots.
+   * Selector format: "host-selector >>> inner-selector" or plain CSS selector.
+   */
+  private async deepQuery(selector: string): Promise<{ objectId: string; backendNodeId: number }> {
+    const result = await this.transport.send('Runtime.evaluate', {
+      expression: `(function() {
+        function deepQuery(root, selector) {
+          // Try direct match first
+          var el = root.querySelector(selector);
+          if (el) return el;
+          // Traverse shadow roots
+          var all = root.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            if (all[i].shadowRoot) {
+              var found = deepQuery(all[i].shadowRoot, selector);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+        var parts = ${JSON.stringify(selector)}.split('>>>').map(function(s) { return s.trim(); });
+        var current = document;
+        for (var p = 0; p < parts.length; p++) {
+          var sel = parts[p];
+          if (p === parts.length - 1) {
+            // Last segment: use deep search from current context
+            var found = (current === document) ? deepQuery(document, sel) : deepQuery(current, sel);
+            return found ? true : null;
+          } else {
+            // Intermediate segment: find host and enter its shadow root
+            var host = (current === document) ? document.querySelector(sel) : current.querySelector(sel);
+            if (!host) return null;
+            if (!host.shadowRoot) return null;
+            current = host.shadowRoot;
+          }
+        }
+        return null;
+      })()`,
+      returnByValue: true,
+    }) as Record<string, unknown>;
+
+    // We need the element as a RemoteObject, not by value.
+    // Re-run returning the element reference.
+    const refResult = await this.transport.send('Runtime.evaluate', {
+      expression: `(function() {
+        function deepQuery(root, selector) {
+          var el = root.querySelector(selector);
+          if (el) return el;
+          var all = root.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            if (all[i].shadowRoot) {
+              var found = deepQuery(all[i].shadowRoot, selector);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+        var parts = ${JSON.stringify(selector)}.split('>>>').map(function(s) { return s.trim(); });
+        var current = document;
+        for (var p = 0; p < parts.length; p++) {
+          var sel = parts[p];
+          if (p === parts.length - 1) {
+            return (current === document) ? deepQuery(document, sel) : deepQuery(current, sel);
+          } else {
+            var host = (current === document) ? document.querySelector(sel) : current.querySelector(sel);
+            if (!host || !host.shadowRoot) return null;
+            current = host.shadowRoot;
+          }
+        }
+        return null;
+      })()`,
+      returnByValue: false,
+    }) as Record<string, unknown>;
+
+    const obj = refResult.result as Record<string, unknown>;
+    if (!obj?.objectId || obj.subtype === 'null') {
+      throw new Error(`Element not found (deep query): ${selector}`);
+    }
+
+    const objectId = obj.objectId as string;
+
+    // Get backendNodeId via DOM.describeNode
+    let backendNodeId = -1;
+    try {
+      const descResult = await this.transport.send('DOM.requestNode', {
+        objectId,
+      }) as { nodeId: number };
+      if (descResult.nodeId) {
+        const desc = await this.transport.send('DOM.describeNode', {
+          nodeId: descResult.nodeId,
+        }) as { node: { backendNodeId: number } };
+        backendNodeId = desc.node.backendNodeId;
+      }
+    } catch {
+      // backendNodeId remains -1 for elements that can't be described
+    }
+
+    return { objectId, backendNodeId };
+  }
+
+  /**
+   * Click an element using shadow-piercing deep query.
+   * Selector supports ">>>" to pierce shadow DOM boundaries.
+   * Example: "#turnstile-widget >>> input[type=checkbox]"
+   */
+  async clickDeep(selector: string): Promise<void> {
+    const { objectId } = await this.deepQuery(selector);
+
+    // Get bounding rect via JS on the RemoteObject
+    const rectResult = await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        this.scrollIntoView({ block: 'center', inline: 'center' });
+        var r = this.getBoundingClientRect();
+        return { x: r.x, y: r.y, width: r.width, height: r.height };
+      }`,
+      returnByValue: true,
+    }) as { result?: { value?: { x: number; y: number; width: number; height: number } } };
+
+    const rect = rectResult.result?.value;
+    if (!rect || (rect.width === 0 && rect.height === 0)) {
+      // Fallback: JS click
+      await this.transport.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function() { this.click(); }`,
+        returnByValue: true,
+      });
+      await this.page.waitForStable();
+      return;
+    }
+
+    const x = rect.x + rect.width / 2;
+    const y = rect.y + rect.height / 2;
+
+    // Human-like: move → pause → press → release
+    await this.transport.send('Input.dispatchMouseEvent', {
+      type: 'mouseMoved', x, y,
+    });
+    await new Promise(r => setTimeout(r, 30 + Math.floor(Math.random() * 60)));
+    await this._dispatchClick(x, y);
+    await this.page.waitForStable();
+  }
+
+  /**
+   * Fill an input using shadow-piercing deep query.
+   * Selector supports ">>>" to pierce shadow DOM boundaries.
+   */
+  async fillDeep(selector: string, text: string): Promise<void> {
+    const { objectId } = await this.deepQuery(selector);
+
+    // Clear and focus
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        this.scrollIntoView({ block: 'center' });
+        if ('value' in this) this.value = '';
+        this.focus();
+      }`,
+      returnByValue: true,
+    });
+
+    // Click to activate
+    const rectResult = await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        var r = this.getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      }`,
+      returnByValue: true,
+    }) as { result?: { value?: { x: number; y: number } } };
+
+    const pos = rectResult.result?.value;
+    if (pos && (pos.x !== 0 || pos.y !== 0)) {
+      await this._dispatchClick(pos.x, pos.y);
+    }
+
+    // Type character by character
+    for (const char of text) {
+      await this.transport.send('Input.insertText', { text: char });
+      await new Promise(r => setTimeout(r, 50 + Math.floor(Math.random() * 100)));
+    }
+
+    // Dispatch events
+    await this.transport.send('Runtime.callFunctionOn', {
+      objectId,
+      functionDeclaration: `function() {
+        this.dispatchEvent(new Event('input', { bubbles: true }));
+        this.dispatchEvent(new Event('change', { bubbles: true }));
+      }`,
+      returnByValue: true,
+    });
+  }
+
+  /**
+   * Observe shadow DOM: find all shadow hosts and their interactive content.
+   * Returns shadow hosts with their inner elements.
+   */
+  async observeShadow(): Promise<unknown> {
+    const result = await this.transport.send('Runtime.evaluate', {
+      expression: `(function() {
+        var hosts = [];
+        function findShadowHosts(root, depth) {
+          if (depth > 5) return;
+          var all = root.querySelectorAll('*');
+          for (var i = 0; i < all.length; i++) {
+            var el = all[i];
+            if (el.shadowRoot) {
+              var iframes = Array.from(el.shadowRoot.querySelectorAll('iframe')).map(function(f) {
+                return { src: f.src, name: f.name, id: f.id };
+              });
+              var SELECTORS = 'button, input, select, textarea, a[href], [role="button"], [role="checkbox"], [role="link"], [tabindex], label';
+              var elements = Array.from(el.shadowRoot.querySelectorAll(SELECTORS)).filter(function(e) {
+                var r = e.getBoundingClientRect();
+                if (r.width === 0 && r.height === 0) return false;
+                var s = window.getComputedStyle(e);
+                return s.display !== 'none' && s.visibility !== 'hidden';
+              }).map(function(e, idx) {
+                var sel = '';
+                if (e.id) sel = '#' + e.id;
+                else if (e.className && typeof e.className === 'string') sel = e.tagName.toLowerCase() + '.' + e.className.trim().split(/\\s+/)[0];
+                else sel = e.tagName.toLowerCase();
+                var attrs = {};
+                for (var a of e.attributes) attrs[a.name] = a.value;
+                return {
+                  index: idx,
+                  tag: e.tagName.toLowerCase(),
+                  type: e.type || undefined,
+                  text: (e.textContent || '').trim().slice(0, 200),
+                  selector: sel,
+                  attributes: attrs,
+                  rect: (function() { var r = e.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(),
+                };
+              });
+              var hostId = el.id || el.tagName.toLowerCase();
+              var hostClasses = el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).join('.') : '';
+              hosts.push({
+                hostSelector: el.id ? '#' + el.id : el.tagName.toLowerCase() + hostClasses,
+                hostTag: el.tagName.toLowerCase(),
+                elements: elements,
+                iframes: iframes,
+              });
+              // Recurse into nested shadow roots
+              findShadowHosts(el.shadowRoot, depth + 1);
+            }
+          }
+        }
+        findShadowHosts(document, 0);
+        return { shadowHosts: hosts, count: hosts.length };
+      })()`,
+      returnByValue: true,
+    }) as { result?: { value?: unknown } };
+
+    return result?.result?.value;
   }
 
   /**

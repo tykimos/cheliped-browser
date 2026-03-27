@@ -10,6 +10,8 @@ export type { UIGraph, UIGraphNode, UIGraphEdge, UIFormGroup, UINodeType, UIEdge
 export type { SemanticAction, ActionParam, SemanticActionType } from './graph/action.types.js';
 export type { SessionConfig, SessionProfile, StoredCookie } from './session/session.types.js';
 export type { SecurityPolicy, NetworkPolicy, SecurityViolation } from './security/security.types.js';
+export { FrameManager } from './browser/frame-manager.js';
+export type { FrameDetail } from './browser/frame-manager.js';
 export { UIGraphBuilder } from './graph/ui-graph.js';
 export { ActionGenerator } from './graph/action-generator.js';
 export { SessionManager } from './session/session-manager.js';
